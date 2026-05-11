@@ -4,7 +4,7 @@ import {
   Check, Calendar, Clock, Users, Settings, Eye, EyeOff,
   BarChart3, Phone, Mail, MapPin, ArrowLeft, LogIn, AlertTriangle,
   CheckCircle, XCircle, ChevronRight, Save, MessageSquare, CalendarOff,
-, Send } from 'lucide-react';
+Send } from 'lucide-react';
 import axios from 'axios';
 import './index.css';
 

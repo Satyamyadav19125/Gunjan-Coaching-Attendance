@@ -9,7 +9,7 @@ import axios from 'axios';
 import './index.css';
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
 });
 
 API.interceptors.request.use((config) => {
@@ -35,7 +35,7 @@ export default function App() {
 
   const checkSetup = async () => {
     try {
-      const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/check-setup`);
+      const res = await axios.get(`${import.meta.env.VITE_API_URL || '/api'}/auth/check-setup`);
       setConfig(res.data.config);
 
       if (res.data.setupDone && !token) {
@@ -350,7 +350,7 @@ function TeacherSetup({ onComplete, showToast }) {
     setLoading(true);
     try {
       const res = await axios.post(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/setup`,
+        `${import.meta.env.VITE_API_URL || '/api'}/auth/setup`,
         data
       );
       localStorage.setItem('token', res.data.token);

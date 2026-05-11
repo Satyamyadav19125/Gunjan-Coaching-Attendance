@@ -2,13 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -16,19 +16,6 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-// Serve static files from frontend build
-app.use(express.static(path.join(__dirname, 'frontend/dist')));
-
-// Serve index.html for all non-API routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
-});
-
-app.get('*', (req, res) => {
-  if (!req.url.startsWith('/api')) {
-    res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
-  }
-});
 app.use(express.json());
 
 // MongoDB Connection
@@ -111,36 +98,18 @@ const authorizeTeacher = (req, res, next) => {
 // ROUTES: AUTH
 // ===========================
 
-// First time setup
 app.post('/api/auth/setup', async (req, res) => {
   try {
     const existing = await Config.findOne();
     if (existing) return res.status(400).json({ error: 'Already set up' });
 
-    const {
-      teacherPassword,
-      studentPassword,
-      parentPassword,
-      teacherName,
-      phone,
-      email,
-      classroomName,
-      mapUrl,
-      classStart,
-      classEnd,
-    } = req.body;
+    const { teacherPassword, studentPassword, parentPassword, teacherName, phone, email, classroomName, mapUrl, classStart, classEnd } = req.body;
 
     const config = new Config({
       teacherPassword: await bcrypt.hash(teacherPassword, 10),
       studentPassword: await bcrypt.hash(studentPassword, 10),
       parentPassword: await bcrypt.hash(parentPassword, 10),
-      teacherName,
-      phone,
-      email,
-      classroomName,
-      mapUrl,
-      classStart,
-      classEnd,
+      teacherName, phone, email, classroomName, mapUrl, classStart, classEnd,
     });
 
     await config.save();
@@ -151,20 +120,15 @@ app.post('/api/auth/setup', async (req, res) => {
   }
 });
 
-// Check if setup is done
 app.get('/api/auth/check-setup', async (req, res) => {
   try {
     const config = await Config.findOne().select('-teacherPassword -studentPassword -parentPassword');
-    res.json({
-      setupDone: !!config,
-      config,
-    });
+    res.json({ setupDone: !!config, config });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Login with password only
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { password } = req.body;
@@ -173,7 +137,6 @@ app.post('/api/auth/login', async (req, res) => {
     const config = await Config.findOne();
     if (!config) return res.status(401).json({ error: 'System not set up yet' });
 
-    // Check which password it is
     const isTeacher = await bcrypt.compare(password, config.teacherPassword);
     const isStudent = await bcrypt.compare(password, config.studentPassword);
     const isParent = await bcrypt.compare(password, config.parentPassword);
@@ -188,7 +151,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     const token = jwt.sign({ role }, process.env.JWT_SECRET);
 
-    // If student or parent, return list of students to pick from
     if (role === 'student' || role === 'parent') {
       const students = await Student.find().select('_id name rollNumber phone subjects');
       return res.json({ token, role, students });
@@ -207,18 +169,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/students', authenticate, authorizeTeacher, async (req, res) => {
   try {
     const { name, rollNumber, phone, parentPhone, aadhar, subjects, notes } = req.body;
-
-    const student = new Student({
-      name,
-      rollNumber,
-      phone,
-      parentPhone,
-      aadhar,
-      subjects,
-      notes,
-      joinDate: new Date().toISOString().split('T')[0],
-    });
-
+    const student = new Student({ name, rollNumber, phone, parentPhone, aadhar, subjects, notes, joinDate: new Date().toISOString().split('T')[0] });
     await student.save();
     res.json(student);
   } catch (err) {
@@ -271,18 +222,12 @@ app.delete('/api/students/:id', authenticate, authorizeTeacher, async (req, res)
 app.post('/api/attendance', authenticate, async (req, res) => {
   try {
     const { studentId, date, action } = req.body;
-
     let attendance = await Attendance.findOne({ studentId, date });
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     if (!attendance) {
-      attendance = new Attendance({
-        studentId,
-        date,
-        status: 'present',
-        markedBy: req.user.role === 'teacher' ? 'teacher' : 'self',
-      });
+      attendance = new Attendance({ studentId, date, status: 'present', markedBy: req.user.role === 'teacher' ? 'teacher' : 'self' });
     }
 
     if (action === 'in') attendance.inTime = timeStr;
@@ -336,11 +281,7 @@ app.delete('/api/attendance/:id', authenticate, authorizeTeacher, async (req, re
 app.post('/api/announcements', authenticate, authorizeTeacher, async (req, res) => {
   try {
     const { message, type, dates } = req.body;
-    const announcement = new Announcement({
-      message,
-      type,
-      dates: type === 'off-day' ? dates : [],
-    });
+    const announcement = new Announcement({ message, type, dates: type === 'off-day' ? dates : [] });
     await announcement.save();
     res.json(announcement);
   } catch (err) {
@@ -388,6 +329,16 @@ app.put('/api/config', authenticate, authorizeTeacher, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ===========================
+// SERVE FRONTEND (must be AFTER all API routes)
+// ===========================
+
+app.use(express.static(path.join(__dirname, 'frontend/dist')));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
 });
 
 // ===========================

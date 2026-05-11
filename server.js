@@ -1,5 +1,10 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
@@ -11,6 +16,19 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
+// Serve static files from frontend build
+app.use(express.static(path.join(__dirname, 'frontend/dist')));
+
+// Serve index.html for all non-API routes
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
+});
+
+app.get('*', (req, res) => {
+  if (!req.url.startsWith('/api')) {
+    res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
+  }
+});
 app.use(express.json());
 
 // MongoDB Connection

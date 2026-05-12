@@ -1,765 +1,467 @@
 import React, { useState, useEffect } from 'react';
 import {
-  GraduationCap, LogOut, Bell, Plus, Edit2, Trash2,
-  Check, Calendar, Clock, Users, Settings, Eye, EyeOff,
-  BarChart3, Phone, Mail, MapPin, ArrowLeft, LogIn, AlertTriangle,
-  CheckCircle, XCircle, ChevronRight, Save, MessageSquare, CalendarOff,
-Send } from 'lucide-react';
+  GraduationCap, LogIn, LogOut, User, Users, UserPlus,
+  Calendar, CalendarOff, Clock, Phone, Mail, MapPin,
+  Plus, Trash2, Edit2, Save, X, Search,
+  ChevronRight, ArrowLeft, CheckCircle, XCircle,
+  AlertTriangle, Info, BarChart3, MessageSquare, Send,
+  Megaphone, Eye, EyeOff, BookOpen, Settings
+} from 'lucide-react';
 import axios from 'axios';
 import './index.css';
 
-const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
-});
-
-API.interceptors.request.use((config) => {
+// ============================
+// AXIOS SETUP
+// ============================
+const api = axios.create({ baseURL: '/api' });
+api.interceptors.request.use(config => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// =====================================================================
+// ============================
 // MAIN APP
-// =====================================================================
+// ============================
 export default function App() {
   const [view, setView] = useState('landing');
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
-  const [role, setRole] = useState(() => localStorage.getItem('role'));
-  const [selectedStudent, setSelectedStudent] = useState(() => localStorage.getItem('selectedStudent'));
-  const [config, setConfig] = useState(null);
-  const [toast, setToast] = useState('');
+  const [info, setInfo] = useState({});
+  const [role, setRole] = useState(localStorage.getItem('role'));
+  const [students, setStudents] = useState([]);
+  const [selectedStudent, setSelectedStudent] = useState(
+    JSON.parse(localStorage.getItem('selectedStudent') || 'null')
+  );
 
   useEffect(() => {
-    checkSetup();
+    // Load public coaching info
+    api.get('/public/info').then(r => setInfo(r.data)).catch(() => {});
+
+    // Resume session
+    const savedRole = localStorage.getItem('role');
+    const savedStudent = JSON.parse(localStorage.getItem('selectedStudent') || 'null');
+    if (savedRole === 'teacher') setView('teacher');
+    else if (savedRole === 'student' && savedStudent) setView('student');
+    else if (savedRole === 'parent' && savedStudent) setView('parent');
   }, []);
 
-  const checkSetup = async () => {
-    try {
-      const res = await axios.get(`${import.meta.env.VITE_API_URL || '/api'}/auth/check-setup`);
-      setConfig(res.data.config);
-
-      if (res.data.setupDone && !token) {
-        setView('landing');
-      } else if (token && role) {
-        if (role === 'teacher') {
-          setView('teacher-dashboard');
-        } else if (selectedStudent) {
-          setView(role === 'student' ? 'student-dashboard' : 'parent-dashboard');
-        } else {
-          setView('pick-student');
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('role');
-    localStorage.removeItem('selectedStudent');
-    setToken(null);
+  const handleSignOut = () => {
+    localStorage.clear();
     setRole(null);
     setSelectedStudent(null);
     setView('landing');
-    showToast('Logged out');
   };
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 2800);
-  };
-
-  // Views
-  if (view === 'teacher-setup') {
-    return <TeacherSetup onComplete={() => checkSetup()} showToast={showToast} />;
-  }
-
-  if (view === 'landing') {
-    return <LandingPage config={config} onLogin={() => setView('login')} />;
-  }
-
-  if (view === 'login') {
-    return (
-      <LoginPage
-        onBack={() => setView('landing')}
-        onSuccess={(t, r, students) => {
-          localStorage.setItem('token', t);
-          localStorage.setItem('role', r);
-          setToken(t);
-          setRole(r);
-
-          if (r === 'teacher') {
-            setView('teacher-dashboard');
-            showToast('Welcome, Teacher! 👨‍🏫');
-          } else {
-            setView('pick-student');
-            showToast(`${r === 'student' ? 'Student' : 'Parent'} login successful`);
-          }
-        }}
-        showToast={showToast}
-        config={config}
-      />
-    );
-  }
-
-  if (view === 'pick-student' && token && role !== 'teacher') {
-    return (
-      <PickStudentPage
-        role={role}
-        onSelectStudent={(sid, sname) => {
-          localStorage.setItem('selectedStudent', JSON.stringify({ id: sid, name: sname }));
-          setSelectedStudent(JSON.stringify({ id: sid, name: sname }));
-          setView(role === 'student' ? 'student-dashboard' : 'parent-dashboard');
-        }}
-        onLogout={logout}
-        showToast={showToast}
-      />
-    );
-  }
-
-  if (view === 'teacher-dashboard' && token) {
-    return <TeacherDashboard config={config} onLogout={logout} showToast={showToast} />;
-  }
-
-  if (view === 'student-dashboard' && token && selectedStudent) {
-    const student = JSON.parse(selectedStudent);
-    return <StudentDashboard studentId={student.id} studentName={student.name} onLogout={logout} showToast={showToast} />;
-  }
-
-  if (view === 'parent-dashboard' && token && selectedStudent) {
-    const student = JSON.parse(selectedStudent);
-    return <ParentDashboard studentId={student.id} studentName={student.name} onLogout={logout} showToast={showToast} />;
-  }
-
-  return <div className="container mt-4">Loading...</div>;
+  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} />;
+  if (view === 'register') return <Register info={info} onBack={() => setView('landing')} onDone={() => setView('login')} />;
+  if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(r, s) => {
+    setRole(r);
+    if (r === 'teacher') { setView('teacher'); }
+    else { setStudents(s); setView('pick-student'); }
+  }} />;
+  if (view === 'pick-student') return <PickStudent students={students} role={role} onPick={(s) => {
+    setSelectedStudent(s);
+    localStorage.setItem('selectedStudent', JSON.stringify(s));
+    setView(role === 'student' ? 'student' : 'parent');
+  }} onBack={handleSignOut} />;
+  if (view === 'teacher') return <TeacherDashboard info={info} onSignOut={handleSignOut} />;
+  if (view === 'student') return <StudentDashboard student={selectedStudent} info={info} onSignOut={handleSignOut} />;
+  if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} onSignOut={handleSignOut} />;
+  return null;
 }
 
-// =====================================================================
-// LANDING PAGE (Advertisement)
-// =====================================================================
-function LandingPage({ config, onLogin }) {
+// ============================
+// LANDING
+// ============================
+function Landing({ info, onSignIn, onRegister }) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-      {/* Header with Login */}
-      <header style={{
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        padding: '16px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-      }}>
-        <div style={{
-          maxWidth: '1200px',
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'var(--accent)',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: '700',
-            }}>
-              <GraduationCap size={24} />
-            </div>
-            <div>
-              <div className="display" style={{ fontSize: '18px' }}>
-                {config?.classroomName || 'Coaching Center'}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--ink-soft)', marginTop: '2px' }}>Attendance Tracking</div>
-            </div>
+    <div className="page">
+      <header className="header">
+        <div className="logo">
+          <GraduationCap size={28} />
+          <div>
+            <h1>{info.classroomName || 'Coaching Center'}</h1>
+            <p className="muted">Attendance Tracking</p>
           </div>
-          <button onClick={onLogin} className="btn btn-primary btn-sm">
-            <LogIn size={14} /> Sign In
-          </button>
         </div>
+        <button className="btn btn-primary" onClick={onSignIn}>
+          <LogIn size={16} /> Sign In
+        </button>
       </header>
 
-      {/* Hero Section */}
-      <section style={{
-        background: 'linear-gradient(135deg, var(--accent-soft) 0%, var(--bg) 100%)',
-        padding: 'clamp(40px, 10vw, 80px) 20px',
-        textAlign: 'center',
-      }}>
-        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-          <h1 className="display" style={{
-            fontSize: 'clamp(32px, 8vw, 64px)',
-            lineHeight: '1.1',
-            marginBottom: '20px',
-            color: 'var(--ink)',
-          }}>
-            Smart Attendance Tracking for Your Coaching Center
-          </h1>
-          <p style={{
-            fontSize: 'clamp(16px, 4vw, 20px)',
-            color: 'var(--ink-soft)',
-            marginBottom: '32px',
-            lineHeight: '1.6',
-            maxWidth: '700px',
-            margin: '0 auto 32px',
-          }}>
-            Students check in with one tap. Parents monitor progress in real-time. Teachers manage everything from one dashboard.
-          </p>
-          <button onClick={onLogin} className="btn btn-primary" style={{ padding: '14px 32px', fontSize: '16px' }}>
-            Get Started Now
+      <section className="hero">
+        <h1 className="display">Smart Attendance Tracking for {info.classroomName || 'Your Coaching Center'}</h1>
+        <p>Students check in with one tap. Parents see real-time updates. Teachers manage everything from one dashboard.</p>
+        <div className="hero-buttons">
+          <button className="btn btn-primary btn-lg" onClick={onSignIn}>
+            <LogIn size={18} /> Sign In
+          </button>
+          <button className="btn btn-secondary btn-lg" onClick={onRegister}>
+            <UserPlus size={18} /> Register as New Student
           </button>
         </div>
       </section>
 
-      {/* Features Grid */}
-      <section style={{ padding: '60px 20px', background: 'var(--surface)' }}>
-        <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-          <h2 className="display" style={{
-            fontSize: '32px',
-            textAlign: 'center',
-            marginBottom: '48px',
-          }}>
-            How It Works
-          </h2>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '24px',
-          }}>
-            <FeatureCard
-              icon={<Check size={32} style={{ color: 'var(--success)' }} />}
-              title="Students Check In"
-              desc="One tap to mark arrival. Times are recorded automatically. No confusion, no paperwork."
-            />
-            <FeatureCard
-              icon={<BarChart3 size={32} style={{ color: 'var(--accent)' }} />}
-              title="Parents Track Progress"
-              desc="See attendance history, percentage, and updates. Stay connected with your child's learning."
-            />
-            <FeatureCard
-              icon={<Settings size={32} style={{ color: 'var(--warn)' }} />}
-              title="Teachers Control Everything"
-              desc="Manage students, view analytics, send announcements, all from one place."
-            />
+      <section className="features">
+        <h2 className="display">How It Works</h2>
+        <div className="feature-grid">
+          <div className="card">
+            <CheckCircle size={32} color="#16a34a" />
+            <h3>Students Check In</h3>
+            <p>One tap to mark arrival. Check-in and check-out times recorded automatically.</p>
+          </div>
+          <div className="card">
+            <BarChart3 size={32} color="#d97706" />
+            <h3>Parents Track Progress</h3>
+            <p>See attendance history, percentage, and reasons for absence.</p>
+          </div>
+          <div className="card">
+            <Settings size={32} color="#dc2626" />
+            <h3>Teacher Controls Everything</h3>
+            <p>Manage students, send announcements, and view reports.</p>
           </div>
         </div>
       </section>
 
-      {/* Coaching Info Section */}
-      {config && (
-        <section style={{ padding: '60px 20px', background: 'var(--bg)' }}>
-          <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-            <h2 className="display" style={{
-              fontSize: '32px',
-              textAlign: 'center',
-              marginBottom: '48px',
-            }}>
-              {config.classroomName}
-            </h2>
-
-            <div className="card" style={{ padding: '40px', marginBottom: '40px' }}>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                gap: '32px',
-              }}>
-                <InfoBlock icon={<Users size={20} />} label="Teacher" value={config.teacherName} />
-                <InfoBlock icon={<Phone size={20} />} label="Phone" value={<a href={`tel:${config.phone}`}>{config.phone}</a>} />
-                <InfoBlock icon={<Mail size={20} />} label="Email" value={<a href={`mailto:${config.email}`}>{config.email}</a>} />
-                <InfoBlock icon={<Clock size={20} />} label="Class Hours" value={`${config.classStart} – ${config.classEnd}`} />
-                <InfoBlock icon={<MapPin size={20} />} label="Location" value={<a href={config.mapUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>View on Maps</a>} />
-              </div>
+      <section className="info-section">
+        <h2 className="display">About Us</h2>
+        <div className="info-grid">
+          {info.teacherName && (
+            <div className="info-row">
+              <User size={18} /><span>{info.teacherName}</span>
             </div>
-
-            <div style={{ textAlign: 'center' }}>
-              <button onClick={onLogin} className="btn btn-primary" style={{ padding: '12px 28px' }}>
-                Start Tracking Now
-              </button>
+          )}
+          {info.phone && (
+            <div className="info-row">
+              <Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a>
             </div>
-          </div>
-        </section>
-      )}
+          )}
+          {info.email && (
+            <div className="info-row">
+              <Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a>
+            </div>
+          )}
+          {info.mapUrl && (
+            <div className="info-row">
+              <MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a>
+            </div>
+          )}
+          {info.classStart && info.classEnd && (
+            <div className="info-row">
+              <Clock size={18} /><span>Class hours: {info.classStart} - {info.classEnd}</span>
+            </div>
+          )}
+        </div>
+      </section>
 
-      {/* Footer */}
-      <footer style={{
-        background: 'var(--surface)',
-        borderTop: '1px solid var(--border)',
-        padding: '20px',
-        textAlign: 'center',
-        color: 'var(--ink-mute)',
-        fontSize: '12px',
-        marginTop: 'auto',
-      }}>
-        © {new Date().getFullYear()} Attendance System. All rights reserved.
+      <footer className="footer">
+        <p>© {new Date().getFullYear()} {info.classroomName || 'Coaching Center'} · Attendance System</p>
       </footer>
     </div>
   );
 }
 
-function FeatureCard({ icon, title, desc }) {
-  return (
-    <div className="card" style={{ padding: '24px', textAlign: 'center' }}>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'center' }}>{icon}</div>
-      <h3 className="display" style={{ fontSize: '18px', marginBottom: '12px' }}>{title}</h3>
-      <p style={{ color: 'var(--ink-soft)', fontSize: '14px', lineHeight: '1.6' }}>{desc}</p>
-    </div>
-  );
-}
-
-function InfoBlock({ icon, label, value }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ color: 'var(--accent)', marginBottom: '12px', display: 'flex', justifyContent: 'center' }}>{icon}</div>
-      <div style={{ fontSize: '12px', color: 'var(--ink-soft)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '4px' }}>
-        {label}
-      </div>
-      <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--ink)' }}>{value}</div>
-    </div>
-  );
-}
-
-// =====================================================================
-// SETUP PAGE
-// =====================================================================
-function TeacherSetup({ onComplete, showToast }) {
-  const [data, setData] = useState({
-    teacherPassword: '',
-    studentPassword: '',
-    parentPassword: '',
-    teacherName: 'Gunjan Yadav',
-    phone: '9310795698',
-    email: 'gunjanyadav1718@gmail.com',
-    classroomName: "Gunjan Yadav's Coaching",
-    mapUrl: 'https://maps.app.goo.gl/CfQzyXvRqEm1DBrDA',
-    classStart: '16:00',
-    classEnd: '18:00',
-  });
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
-  const [showPasswords, setShowPasswords] = useState(false);
-
-  const submit = async () => {
-    if (!data.teacherPassword || data.teacherPassword.length < 3) return setErr('Teacher password min 3 chars');
-    if (!data.studentPassword || data.studentPassword.length < 3) return setErr('Student password min 3 chars');
-    if (!data.parentPassword || data.parentPassword.length < 3) return setErr('Parent password min 3 chars');
-
-    setLoading(true);
-    try {
-      const res = await axios.post(
-        `${import.meta.env.VITE_API_URL || '/api'}/auth/setup`,
-        data
-      );
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('role', 'teacher');
-      showToast('Setup complete! Welcome! 👨‍🏫');
-      setTimeout(onComplete, 1500);
-    } catch (err) {
-      setErr(err.response?.data?.error || 'Setup failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, var(--accent-soft) 0%, var(--bg) 100%)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '20px',
-    }}>
-      <div className="card" style={{ maxWidth: '600px', width: '100%', padding: '40px' }}>
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '14px',
-            background: 'var(--accent)',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 16px',
-          }}>
-            <GraduationCap size={28} />
-          </div>
-          <h1 className="display" style={{ fontSize: '26px', marginBottom: '8px' }}>
-            Welcome! 👋
-          </h1>
-          <p style={{ color: 'var(--ink-soft)', fontSize: '14px' }}>
-            Let's set up your coaching center
-          </p>
-        </div>
-
-        <div style={{ display: 'grid', gap: '16px' }}>
-          <Field label="Your Name">
-            <input className="input" value={data.teacherName} onChange={(e) => setData({ ...data, teacherName: e.target.value })} />
-          </Field>
-
-          <Field label="Coaching Center Name">
-            <input className="input" value={data.classroomName} onChange={(e) => setData({ ...data, classroomName: e.target.value })} />
-          </Field>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <Field label="Phone">
-              <input className="input" value={data.phone} onChange={(e) => setData({ ...data, phone: e.target.value })} />
-            </Field>
-            <Field label="Email">
-              <input className="input" value={data.email} onChange={(e) => setData({ ...data, email: e.target.value })} />
-            </Field>
-          </div>
-
-          <Field label="Maps URL">
-            <input className="input" value={data.mapUrl} onChange={(e) => setData({ ...data, mapUrl: e.target.value })} />
-          </Field>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <Field label="Class Start Time">
-              <input type="time" className="input" value={data.classStart} onChange={(e) => setData({ ...data, classStart: e.target.value })} />
-            </Field>
-            <Field label="Class End Time">
-              <input type="time" className="input" value={data.classEnd} onChange={(e) => setData({ ...data, classEnd: e.target.value })} />
-            </Field>
-          </div>
-
-          <hr style={{ borderColor: 'var(--border)', margin: '16px 0' }} />
-
-          <Field label="🔐 YOUR Teacher Password">
-            <div style={{ position: 'relative' }}>
-              <input
-                className="input"
-                type={showPasswords ? 'text' : 'password'}
-                value={data.teacherPassword}
-                onChange={(e) => setData({ ...data, teacherPassword: e.target.value })}
-                placeholder="You use this to log in"
-              />
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>
-              You'll use this password to access the teacher dashboard.
-            </div>
-          </Field>
-
-          <Field label="📚 Student Password (Give to all students)">
-            <input
-              className="input"
-              type={showPasswords ? 'text' : 'password'}
-              value={data.studentPassword}
-              onChange={(e) => setData({ ...data, studentPassword: e.target.value })}
-              placeholder="Students use this to check in"
-            />
-            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>
-              Share this password with all your students. They use only this to log in.
-            </div>
-          </Field>
-
-          <Field label="👨‍👩‍👧 Parent Password (Give to all parents)">
-            <input
-              className="input"
-              type={showPasswords ? 'text' : 'password'}
-              value={data.parentPassword}
-              onChange={(e) => setData({ ...data, parentPassword: e.target.value })}
-              placeholder="Parents use this to view reports"
-            />
-            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>
-              Share this password with parents. They use it to view their child's attendance.
-            </div>
-          </Field>
-
-          <button
-            type="button"
-            onClick={() => setShowPasswords(!showPasswords)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--accent)',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '600',
-            }}
-          >
-            {showPasswords ? '👁️ Hide passwords' : '👁️ Show passwords'}
-          </button>
-
-          {err && <div className="tag tag-error" style={{ padding: '10px', width: '100%' }}>{err}</div>}
-
-          <button
-            onClick={submit}
-            disabled={loading}
-            className="btn btn-primary btn-block"
-            style={{ marginTop: '16px', padding: '14px' }}
-          >
-            {loading ? 'Setting up...' : 'Complete Setup'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =====================================================================
-// LOGIN PAGE (Password Only)
-// =====================================================================
-function LoginPage({ onBack, onSuccess, showToast, config }) {
+// ============================
+// LOGIN
+// ============================
+function Login({ info, onBack, onLogin }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
 
-  const login = async (e) => {
-    e.preventDefault();
-    if (!password) return setErr('Enter password');
-
+  const submit = async (e) => {
+    if (e) e.preventDefault();
     setLoading(true);
-    setErr('');
+    setError('');
     try {
-      const res = await API.post('/auth/login', { password });
-      onSuccess(res.data.token, res.data.role, res.data.students);
-    } catch (error) {
-      setErr(error.response?.data?.error || 'Login failed');
+      const res = await api.post('/auth/login', { password });
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('role', res.data.role);
+      onLogin(res.data.role, res.data.students || []);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Login failed');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-        gap: '32px',
-        maxWidth: '900px',
-        width: '100%',
-        alignItems: 'start',
-      }}>
-        {/* Left: Info */}
-        <div>
-          <button onClick={onBack} className="btn btn-ghost btn-sm mb-4" style={{ color: 'var(--ink-soft)' }}>
-            ← Back
-          </button>
-          <h1 className="display" style={{ fontSize: '32px', lineHeight: '1.2', marginBottom: '16px' }}>
-            {config?.classroomName || 'Coaching Center'}
-          </h1>
-          <p style={{ color: 'var(--ink-soft)', fontSize: '16px', lineHeight: '1.6', marginBottom: '24px' }}>
-            One password. Three roles.
-          </p>
-
-          <div className="card" style={{ padding: '20px', marginBottom: '20px', background: 'var(--accent-soft)', border: 'none' }}>
-            <div style={{ fontWeight: '700', color: 'var(--accent-deep)', marginBottom: '8px' }}>👨‍🏫 Teacher?</div>
-            <div style={{ fontSize: '13px', color: 'var(--accent-deep)' }}>Use your teacher password to manage everything.</div>
+    <div className="page-center">
+      <div className="container-narrow">
+        <button className="btn-back" onClick={onBack}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div className="auth-grid">
+          <div>
+            <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
+            <p className="muted">One password. Three roles.</p>
+            <div className="role-card role-teacher">
+              <h3>🎓 Teacher?</h3>
+              <p>Use your teacher password to manage everything.</p>
+            </div>
+            <div className="role-card role-student">
+              <h3>📚 Student?</h3>
+              <p>Use the student password your teacher gave you.</p>
+            </div>
+            <div className="role-card role-parent">
+              <h3>👨‍👩‍👧 Parent?</h3>
+              <p>Use the parent password to see your child's attendance.</p>
+            </div>
           </div>
-
-          <div className="card" style={{ padding: '20px', marginBottom: '20px', background: 'var(--success-soft)', border: 'none' }}>
-            <div style={{ fontWeight: '700', color: 'var(--success)', marginBottom: '8px' }}>📚 Student?</div>
-            <div style={{ fontSize: '13px', color: 'var(--success)' }}>Use the student password your teacher gave you.</div>
-          </div>
-
-          <div className="card" style={{ padding: '20px', background: 'var(--warn-soft)', border: 'none' }}>
-            <div style={{ fontWeight: '700', color: 'var(--warn)', marginBottom: '8px' }}>👨‍👩‍👧 Parent?</div>
-            <div style={{ fontSize: '13px', color: 'var(--warn)' }}>Use the parent password to see your child's attendance.</div>
-          </div>
-        </div>
-
-        {/* Right: Login Form */}
-        <div className="card" style={{ padding: '32px' }}>
-          <h2 className="display" style={{ fontSize: '22px', marginBottom: '8px' }}>Sign In</h2>
-          <p style={{ color: 'var(--ink-soft)', fontSize: '14px', marginBottom: '24px' }}>Enter your password below</p>
-
-          <form onSubmit={login}>
-            <Field label="Password">
-              <div style={{ position: 'relative' }}>
+          <div className="auth-form">
+            <h2 className="display">Sign In</h2>
+            <p className="muted">Enter your password below</p>
+            <form onSubmit={submit}>
+              <label>PASSWORD</label>
+              <div className="password-field">
                 <input
-                  className="input"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={e => setPassword(e.target.value)}
                   placeholder="Enter password"
                   autoFocus
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '12px',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--ink-mute)',
-                  }}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                <button type="button" className="icon-btn" onClick={() => setShowPassword(!showPassword)}>
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-            </Field>
-
-            {err && <div className="tag tag-error" style={{ padding: '10px', marginBottom: '16px', width: '100%' }}>{err}</div>}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn btn-primary btn-block"
-              style={{ padding: '14px', marginBottom: '16px' }}
-            >
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-          </form>
-
-          <hr style={{ borderColor: 'var(--border)', margin: '20px 0' }} />
-
-          <div style={{
-            fontSize: '12px',
-            color: 'var(--ink-soft)',
-            textAlign: 'center',
-            lineHeight: '1.6',
-          }}>
-            <strong>No password yet?</strong><br />
-            Ask your teacher for the password.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =====================================================================
-// PICK STUDENT PAGE
-// =====================================================================
-function PickStudentPage({ role, onSelectStudent, onLogout, showToast }) {
-  const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchStudents();
-  }, []);
-
-  const fetchStudents = async () => {
-    try {
-      const res = await API.get('/students');
-      setStudents(res.data);
-    } catch (err) {
-      showToast('Failed to load students', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      <header style={{
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        padding: '16px',
-      }}>
-        <div style={{
-          maxWidth: '1000px',
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <div>
-            <h1 className="display" style={{ fontSize: '18px' }}>
-              Select Your {role === 'student' ? 'Name' : 'Child'}
-            </h1>
-            <p style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '2px' }}>
-              {role === 'student' ? 'Choose your student record' : 'Select your child to view their attendance'}
+              {error && <div className="error-box">{error}</div>}
+              <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
+                {loading ? 'Signing in...' : 'Sign In'}
+              </button>
+            </form>
+            <hr />
+            <p className="text-center">
+              <strong>No password yet?</strong><br />
+              Ask your teacher for the password.
             </p>
           </div>
-          <button onClick={onLogout} className="btn btn-ghost btn-sm">
-            <LogOut size={14} /> Sign out
-          </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================
+// REGISTER (public)
+// ============================
+function Register({ info, onBack, onDone }) {
+  const [form, setForm] = useState({
+    name: '', phone: '', parentName: '', parentPhone: '',
+    aadhar: '', subjects: [], notes: ''
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const toggleSubject = (s) => {
+    setForm(f => ({
+      ...f,
+      subjects: f.subjects.includes(s) ? f.subjects.filter(x => x !== s) : [...f.subjects, s]
+    }));
+  };
+
+  const validateAadhar = (a) => !a || /^\d{12}$/.test(a.replace(/\s/g, ''));
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!form.name || !form.phone) {
+      setError('Name and phone are required');
+      return;
+    }
+    if (!validateAadhar(form.aadhar)) {
+      setError('Aadhar must be 12 digits');
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.post('/public/register', form);
+      setSuccess(true);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <div className="page-center">
+        <div className="container-narrow">
+          <div className="success-box">
+            <CheckCircle size={48} color="#16a34a" />
+            <h2 className="display">Registration Successful!</h2>
+            <p>Welcome to {info.classroomName || 'our coaching center'}, {form.name}!</p>
+            <p className="muted">Ask your teacher for the student password to log in.</p>
+            <button className="btn btn-primary btn-lg" onClick={onDone}>Go to Sign In</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const availableSubjects = info.subjects && info.subjects.length ? info.subjects : ['Mathematics', 'Science', 'English'];
+
+  return (
+    <div className="page-center">
+      <div className="container-narrow">
+        <button className="btn-back" onClick={onBack}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div className="auth-form">
+          <h1 className="display">Register as New Student</h1>
+          <p className="muted">Fill in your details to join {info.classroomName || 'our coaching center'}</p>
+          <form onSubmit={submit}>
+            <label>Student Name *</label>
+            <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Your full name" required />
+
+            <label>Phone Number *</label>
+            <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder="10-digit phone number" required />
+
+            <label>Parent / Guardian Name</label>
+            <input value={form.parentName} onChange={e => setForm({...form, parentName: e.target.value})} placeholder="Parent's name" />
+
+            <label>Parent / Guardian Phone</label>
+            <input value={form.parentPhone} onChange={e => setForm({...form, parentPhone: e.target.value})} placeholder="Parent's phone number" />
+
+            <label>Aadhar Number (optional)</label>
+            <input value={form.aadhar} onChange={e => setForm({...form, aadhar: e.target.value})} placeholder="12-digit Aadhar number" maxLength={12} />
+
+            <label>Subjects (select what you want to learn)</label>
+            <div className="checkbox-group">
+              {availableSubjects.map(s => (
+                <label key={s} className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={form.subjects.includes(s)}
+                    onChange={() => toggleSubject(s)}
+                  />
+                  <span>{s}</span>
+                </label>
+              ))}
+            </div>
+
+            <label>Notes (optional)</label>
+            <textarea value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} placeholder="Anything you want to tell us" rows={3} />
+
+            {error && <div className="error-box">{error}</div>}
+
+            <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
+              {loading ? 'Registering...' : 'Register'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================
+// PICK STUDENT (after student/parent login)
+// ============================
+function PickStudent({ students, role, onPick, onBack }) {
+  const [search, setSearch] = useState('');
+  const filtered = students.filter(s =>
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
+    (s.rollNumber || '').includes(search)
+  );
+  return (
+    <div className="page-center">
+      <div className="container-narrow">
+        <button className="btn-back" onClick={onBack}>
+          <ArrowLeft size={16} /> Sign out
+        </button>
+        <h1 className="display">{role === 'parent' ? 'Find Your Child' : 'Who Are You?'}</h1>
+        <p className="muted">{role === 'parent' ? 'Select your child to see their attendance' : 'Tap your name to continue'}</p>
+        <div className="search-bar">
+          <Search size={16} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or roll number"
+            autoFocus
+          />
+        </div>
+        <div className="list">
+          {filtered.length === 0 && <p className="muted text-center">No students found.</p>}
+          {filtered.map(s => (
+            <button key={s._id} className="list-item" onClick={() => onPick(s)}>
+              <div>
+                <strong>{s.name}</strong>
+                <p className="muted small">Roll #{s.rollNumber}</p>
+              </div>
+              <ChevronRight size={20} />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================
+// TEACHER DASHBOARD
+// ============================
+function TeacherDashboard({ info, onSignOut }) {
+  const [tab, setTab] = useState('today');
+  return (
+    <div className="page">
+      <header className="dashboard-header">
+        <div>
+          <h1 className="display">Teacher Dashboard</h1>
+          <p className="muted">Welcome back, {info.teacherName || 'Teacher'}</p>
+        </div>
+        <button className="btn btn-outline" onClick={onSignOut}>
+          <LogOut size={16} /> Sign out
+        </button>
       </header>
 
-      <main style={{
-        maxWidth: '900px',
-        margin: '0 auto',
-        padding: '24px 20px',
-      }}>
-        {loading ? (
-          <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
-            <div className="loading" style={{ margin: '0 auto' }} />
-            <p style={{ color: 'var(--ink-soft)', marginTop: '12px' }}>Loading students...</p>
-          </div>
-        ) : students.length === 0 ? (
-          <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
-            <Users size={32} style={{ color: 'var(--ink-mute)', margin: '0 auto' }} />
-            <p style={{ color: 'var(--ink-soft)', marginTop: '12px' }}>No students yet</p>
-          </div>
-        ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: '16px',
-          }}>
-            {students.map((s) => (
-              <button
-                key={s._id}
-                onClick={() => onSelectStudent(s._id, s.name)}
-                className="card"
-                style={{
-                  padding: '24px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  border: '1px solid var(--border)',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.boxShadow = '0 1px 0 rgba(0,0,0,0.02)'}
-              >
-                <div style={{
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '12px',
-                  background: 'var(--accent-soft)',
-                  color: 'var(--accent-deep)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: '700',
-                  fontSize: '20px',
-                  margin: '0 auto 16px',
-                }}>
-                  {s.name.split(' ').map(p => p[0]).join('')}
-                </div>
-                <div className="display" style={{ fontSize: '18px', marginBottom: '4px' }}>
-                  {s.name}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--ink-soft)' }}>
-                  {s.rollNumber} • {(s.subjects || []).join(', ')}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+      <nav className="tabs">
+        <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}>
+          <Calendar size={16} /> Today
+        </button>
+        <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}>
+          <Users size={16} /> Students
+        </button>
+        <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}>
+          <BarChart3 size={16} /> Summary
+        </button>
+        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
+          <Megaphone size={16} /> Announcements
+        </button>
+        <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>
+          <Settings size={16} /> Settings
+        </button>
+      </nav>
+
+      <main className="tab-content">
+        {tab === 'today' && <TodayTab info={info} />}
+        {tab === 'students' && <StudentsTab info={info} />}
+        {tab === 'summary' && <SummaryTab />}
+        {tab === 'announcements' && <AnnouncementsTab />}
+        {tab === 'settings' && <SettingsTab info={info} />}
       </main>
     </div>
   );
 }
 
-// =====================================================================
-// TEACHER DASHBOARD
-// =====================================================================
-function TeacherDashboard({ config, onLogout, showToast }) {
-  const [tab, setTab] = useState('today');
+function TodayTab({ info }) {
   const [students, setStudents] = useState([]);
+  const [todayAtt, setTodayAtt] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [markingStudent, setMarkingStudent] = useState(null);
+  const [reason, setReason] = useState('');
 
-  useEffect(() => {
-    fetchStudents();
-  }, []);
-
-  const fetchStudents = async () => {
+  const load = async () => {
+    setLoading(true);
     try {
-      const res = await API.get('/students');
-      setStudents(res.data);
+      const [s, a] = await Promise.all([
+        api.get('/students'),
+        api.get('/attendance/today'),
+      ]);
+      setStudents(s.data);
+      setTodayAtt(a.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -767,478 +469,769 @@ function TeacherDashboard({ config, onLogout, showToast }) {
     }
   };
 
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      {/* Header */}
-      <header style={{
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        padding: '16px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-      }}>
-        <div style={{
-          maxWidth: '1200px',
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <div>
-            <h1 className="display" style={{ fontSize: '18px' }}>Teacher Dashboard</h1>
-            <p style={{ fontSize: '11px', color: 'var(--ink-soft)', marginTop: '2px' }}>Welcome back, {config?.teacherName}</p>
-          </div>
-          <button onClick={onLogout} className="btn btn-ghost btn-sm">
-            <LogOut size={14} /> Sign out
-          </button>
-        </div>
-      </header>
+  useEffect(() => { load(); }, []);
 
-      {/* Tabs */}
-      <nav style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', paddingTop: '12px', paddingBottom: '0' }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', gap: '8px', padding: '0 20px 12px' }}>
-          <TabButton active={tab === 'today'} onClick={() => setTab('today')}>
-            <Calendar size={14} /> Today
-          </TabButton>
-          <TabButton active={tab === 'students'} onClick={() => setTab('students')}>
-            <Users size={14} /> Students ({students.length})
-          </TabButton>
-          <TabButton active={tab === 'announcements'} onClick={() => setTab('announcements')}>
-            <Bell size={14} /> Announcements
-          </TabButton>
-        </div>
-      </nav>
+  const getAtt = (id) => todayAtt.find(a => a.studentId === id);
 
-      {/* Content */}
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px 20px' }}>
-        {loading && <p style={{ color: 'var(--ink-soft)' }}>Loading...</p>}
-        {!loading && tab === 'today' && <TeacherTodayView students={students} config={config} />}
-        {!loading && tab === 'students' && (
-          <TeacherStudentsView
-            students={students}
-            showAddStudent={showAddStudent}
-            setShowAddStudent={setShowAddStudent}
-            onAddSuccess={() => { fetchStudents(); setShowAddStudent(false); }}
-            onDelete={() => fetchStudents()}
-            showToast={showToast}
-          />
-        )}
-        {!loading && tab === 'announcements' && <AnnouncementsView showToast={showToast} />}
-      </main>
-    </div>
-  );
-}
-
-function TabButton({ active, onClick, children }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '10px 14px',
-        border: 'none',
-        background: active ? 'var(--ink)' : 'transparent',
-        color: active ? 'white' : 'var(--ink-soft)',
-        cursor: 'pointer',
-        borderRadius: '10px 10px 0 0',
-        fontSize: '13px',
-        fontWeight: '600',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function TeacherTodayView({ students, config }) {
-  const today = new Date().toISOString().split('T')[0];
-
-  return (
-    <div>
-      <h2 className="display" style={{ fontSize: '22px', marginBottom: '20px' }}>Today's Attendance - {new Date().toLocaleDateString()}</h2>
-      {students.length === 0 ? (
-        <div className="card text-center" style={{ padding: '40px' }}>
-          <Users size={32} style={{ color: 'var(--ink-mute)', margin: '0 auto' }} />
-          <p style={{ color: 'var(--ink-soft)', marginTop: '12px' }}>No students yet. Add one to get started.</p>
-        </div>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-          gap: '16px',
-        }}>
-          {students.map((s) => (
-            <StudentAttendanceCard key={s._id} student={s} date={today} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StudentAttendanceCard({ student, date }) {
-  const [att, setAtt] = useState(null);
-
-  useEffect(() => {
-    fetchAttendance();
-  }, []);
-
-  const fetchAttendance = async () => {
+  const markPresent = async (id) => {
     try {
-      const res = await API.get(`/attendance/${student._id}`);
-      const rec = res.data.find(a => a.date === date);
-      setAtt(rec || null);
-    } catch (err) {
-      console.error(err);
-    }
+      await api.post('/attendance/teacher-mark', { studentId: id, status: 'present' });
+      load();
+    } catch (err) { alert('Failed: ' + err.message); }
   };
 
+  const markAbsent = async () => {
+    try {
+      await api.post('/attendance/teacher-mark', {
+        studentId: markingStudent._id,
+        status: 'absent',
+        reason: reason || 'No reason given'
+      });
+      setMarkingStudent(null);
+      setReason('');
+      load();
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  if (loading) return <p className="muted">Loading...</p>;
+  if (students.length === 0) return (
+    <div className="empty">
+      <Users size={48} color="#999" />
+      <h3>No students yet</h3>
+      <p className="muted">Go to the Students tab to add your first student.</p>
+    </div>
+  );
+
+  const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
   return (
-    <div className="card" style={{ padding: '16px' }}>
-      <div style={{ fontWeight: '600', marginBottom: '8px' }}>{student.name}</div>
-      <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginBottom: '12px' }}>
-        {student.rollNumber} • {student.phone}
+    <div>
+      <div className="stat-row">
+        <div className="stat">
+          <strong>{today}</strong>
+        </div>
+        <div className="stat green">
+          <CheckCircle size={20} /> {todayAtt.filter(a => a.status === 'present').length} Present
+        </div>
+        <div className="stat red">
+          <XCircle size={20} /> {todayAtt.filter(a => a.status === 'absent').length} Absent
+        </div>
+        <div className="stat muted">
+          <Info size={20} /> {students.length - todayAtt.length} Not marked
+        </div>
       </div>
-      {att && att.status === 'present' ? (
-        <div style={{
-          background: 'var(--success-soft)',
-          color: 'var(--success)',
-          padding: '8px',
-          borderRadius: '8px',
-          fontSize: '12px',
-          fontWeight: '600',
-        }}>
-          ✓ Present ({att.inTime} – {att.outTime || 'pending'})
-        </div>
-      ) : (
-        <div style={{
-          background: 'var(--error-soft)',
-          color: 'var(--error)',
-          padding: '8px',
-          borderRadius: '8px',
-          fontSize: '12px',
-          fontWeight: '600',
-        }}>
-          ✗ Absent
-        </div>
+
+      <div className="list">
+        {students.map(s => {
+          const att = getAtt(s._id);
+          return (
+            <div key={s._id} className="attendance-card">
+              <div>
+                <strong>{s.name}</strong>
+                <p className="muted small">Roll #{s.rollNumber}</p>
+              </div>
+              <div className="attendance-status">
+                {att ? (
+                  <>
+                    {att.status === 'present' ? (
+                      <span className="badge green">
+                        <CheckCircle size={14} /> Present
+                        {att.inTime && ` ${att.inTime}`}
+                        {att.outTime && ` - ${att.outTime}`}
+                      </span>
+                    ) : (
+                      <span className="badge red">
+                        <XCircle size={14} /> Absent {att.reason && `(${att.reason})`}
+                      </span>
+                    )}
+                    {att.markedBy === 'teacher' && (
+                      <span className="badge gray" title="Teacher marked">
+                        <Info size={12} /> Marked by you
+                      </span>
+                    )}
+                    {att.markedBy === 'self' && (
+                      <span className="badge blue" title="Self marked">
+                        <Info size={12} /> Self-marked
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button className="btn-mini btn-green" onClick={() => markPresent(s._id)}>
+                      <CheckCircle size={14} /> Mark Present
+                    </button>
+                    <button className="btn-mini btn-red" onClick={() => setMarkingStudent(s)}>
+                      <XCircle size={14} /> Mark Absent
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {markingStudent && (
+        <Modal onClose={() => setMarkingStudent(null)} title={`Mark ${markingStudent.name} Absent`}>
+          <label>Reason for absence (optional)</label>
+          <input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Sick, family event" autoFocus />
+          <div className="modal-buttons">
+            <button className="btn btn-outline" onClick={() => setMarkingStudent(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={markAbsent}>Mark Absent</button>
+          </div>
+        </Modal>
       )}
     </div>
   );
 }
 
-function TeacherStudentsView({ students, showAddStudent, setShowAddStudent, onAddSuccess, onDelete, showToast }) {
+function StudentsTab({ info }) {
+  const [students, setStudents] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/students');
+      setStudents(r.data);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const del = async (id) => {
+    if (!confirm('Delete this student? All their attendance records will also be deleted.')) return;
+    await api.delete('/students/' + id);
+    load();
+  };
+
+  const filtered = students.filter(s =>
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
+    (s.rollNumber || '').includes(search) ||
+    (s.phone || '').includes(search)
+  );
+
+  if (loading) return <p className="muted">Loading...</p>;
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h2 className="display" style={{ fontSize: '22px' }}>All Students</h2>
-        <button onClick={() => setShowAddStudent(!showAddStudent)} className="btn btn-primary btn-sm">
-          <Plus size={14} /> Add Student
+      <div className="toolbar">
+        <div className="search-bar">
+          <Search size={16} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students" />
+        </div>
+        <button className="btn btn-primary" onClick={() => setAdding(true)}>
+          <Plus size={16} /> Add Student
         </button>
       </div>
 
-      {showAddStudent && <AddStudentForm onSuccess={onAddSuccess} showToast={showToast} />}
+      {filtered.length === 0 && (
+        <div className="empty">
+          <Users size={48} color="#999" />
+          <h3>{students.length === 0 ? 'No students yet' : 'No matching students'}</h3>
+          <p className="muted">{students.length === 0 ? 'Click "Add Student" to add your first one.' : 'Try a different search.'}</p>
+        </div>
+      )}
 
-      <div style={{ display: 'grid', gap: '12px' }}>
-        {students.map((s) => (
-          <StudentRow key={s._id} student={s} onDelete={onDelete} showToast={showToast} />
+      <div className="list">
+        {filtered.map(s => (
+          <div key={s._id} className="student-card">
+            <div>
+              <strong>{s.name}</strong>
+              <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
+              {s.subjects && s.subjects.length > 0 && (
+                <p className="small">Subjects: {s.subjects.join(', ')}</p>
+              )}
+              {s.registeredVia === 'self' && (
+                <span className="badge blue small">Self-registered</span>
+              )}
+            </div>
+            <div className="row-buttons">
+              <button className="icon-btn" onClick={() => setEditing(s)} title="Edit">
+                <Edit2 size={16} />
+              </button>
+              <button className="icon-btn icon-btn-danger" onClick={() => del(s._id)} title="Delete">
+                <Trash2 size={16} />
+              </button>
+            </div>
+          </div>
         ))}
+      </div>
+
+      {(adding || editing) && (
+        <StudentForm
+          info={info}
+          student={editing}
+          onClose={() => { setAdding(false); setEditing(null); }}
+          onSaved={() => { setAdding(false); setEditing(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function StudentForm({ info, student, onClose, onSaved }) {
+  const [form, setForm] = useState(student || {
+    name: '', phone: '', parentName: '', parentPhone: '',
+    aadhar: '', subjects: [], notes: ''
+  });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const toggleSubject = (s) => {
+    setForm(f => ({
+      ...f,
+      subjects: (f.subjects || []).includes(s)
+        ? f.subjects.filter(x => x !== s)
+        : [...(f.subjects || []), s]
+    }));
+  };
+
+  const save = async () => {
+    setError('');
+    if (!form.name) { setError('Name is required'); return; }
+    if (form.aadhar && !/^\d{12}$/.test(form.aadhar.replace(/\s/g, ''))) {
+      setError('Aadhar must be 12 digits'); return;
+    }
+    setSaving(true);
+    try {
+      if (student) {
+        await api.put('/students/' + student._id, form);
+      } else {
+        await api.post('/students', form);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save');
+    } finally { setSaving(false); }
+  };
+
+  const availableSubjects = info.subjects && info.subjects.length ? info.subjects : ['Mathematics', 'Science', 'English'];
+
+  return (
+    <Modal onClose={onClose} title={student ? 'Edit Student' : 'Add New Student'}>
+      <label>Name *</label>
+      <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} autoFocus />
+      <label>Phone</label>
+      <input value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+      <label>Parent Name</label>
+      <input value={form.parentName || ''} onChange={e => setForm({...form, parentName: e.target.value})} />
+      <label>Parent Phone</label>
+      <input value={form.parentPhone || ''} onChange={e => setForm({...form, parentPhone: e.target.value})} />
+      <label>Aadhar (12 digits)</label>
+      <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value})} maxLength={12} />
+      <label>Subjects</label>
+      <div className="checkbox-group">
+        {availableSubjects.map(s => (
+          <label key={s} className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={(form.subjects || []).includes(s)}
+              onChange={() => toggleSubject(s)}
+            />
+            <span>{s}</span>
+          </label>
+        ))}
+      </div>
+      <label>Notes</label>
+      <textarea value={form.notes || ''} onChange={e => setForm({...form, notes: e.target.value})} rows={3} />
+      {error && <div className="error-box">{error}</div>}
+      <div className="modal-buttons">
+        <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
+          <Save size={14} /> {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function SummaryTab() {
+  const [students, setStudents] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/students').then(r => {
+      setStudents(r.data);
+      setLoading(false);
+    });
+  }, []);
+
+  const loadStudent = async (s) => {
+    setSelected(s);
+    const [summ, hist] = await Promise.all([
+      api.get('/attendance/summary/' + s._id),
+      api.get('/attendance/student/' + s._id),
+    ]);
+    setSummary(summ.data);
+    setHistory(hist.data);
+  };
+
+  if (loading) return <p className="muted">Loading...</p>;
+  if (students.length === 0) return (
+    <div className="empty">
+      <BarChart3 size={48} color="#999" />
+      <h3>No students yet</h3>
+      <p className="muted">Add students first to see summaries.</p>
+    </div>
+  );
+
+  const filtered = students.filter(s =>
+    s.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="summary-grid">
+      <div>
+        <div className="search-bar">
+          <Search size={16} />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students" />
+        </div>
+        <div className="list">
+          {filtered.map(s => (
+            <button
+              key={s._id}
+              className={'list-item' + (selected?._id === s._id ? ' active' : '')}
+              onClick={() => loadStudent(s)}
+            >
+              <div>
+                <strong>{s.name}</strong>
+                <p className="muted small">Roll #{s.rollNumber}</p>
+              </div>
+              <ChevronRight size={16} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        {!selected ? (
+          <div className="empty">
+            <Search size={48} color="#999" />
+            <h3>Select a student</h3>
+            <p className="muted">Tap a student to see their attendance summary.</p>
+          </div>
+        ) : (
+          <>
+            <h2 className="display">{selected.name}</h2>
+            <p className="muted">Roll #{selected.rollNumber}</p>
+            {summary && (
+              <div className="summary-stats">
+                <div className="stat-big green">
+                  <strong>{summary.present}</strong>
+                  <span>Present</span>
+                </div>
+                <div className="stat-big red">
+                  <strong>{summary.absent}</strong>
+                  <span>Absent</span>
+                </div>
+                <div className="stat-big blue">
+                  <strong>{summary.percentage}%</strong>
+                  <span>Attendance</span>
+                </div>
+              </div>
+            )}
+            <h3>Attendance History</h3>
+            <div className="list">
+              {history.length === 0 && <p className="muted">No records yet.</p>}
+              {history.map(h => (
+                <div key={h._id} className="history-row">
+                  <div>
+                    <strong>{h.date}</strong>
+                    {h.status === 'present' ? (
+                      <span className="badge green small">
+                        <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
+                      </span>
+                    ) : (
+                      <span className="badge red small">
+                        <XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}
+                      </span>
+                    )}
+                  </div>
+                  {h.markedBy === 'teacher' && <span className="small muted">Marked by you</span>}
+                  {h.markedBy === 'self' && <span className="small muted">Self-marked</span>}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function StudentRow({ student, onDelete, showToast }) {
-  const deleteStudent = async () => {
-    if (!confirm(`Delete ${student.name} and all their records?`)) return;
+function AnnouncementsTab() {
+  const [list, setList] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [type, setType] = useState('general');
+  const [message, setMessage] = useState('');
+  const [dates, setDates] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    const r = await api.get('/announcements');
+    setList(r.data);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const send = async () => {
+    if (!message) return;
+    await api.post('/announcements', {
+      message, type,
+      dates: type === 'off-day' ? dates.split(',').map(d => d.trim()).filter(Boolean) : []
+    });
+    setMessage(''); setDates(''); setAdding(false);
+    load();
+  };
+
+  const del = async (id) => {
+    if (!confirm('Delete this announcement?')) return;
+    await api.delete('/announcements/' + id);
+    load();
+  };
+
+  if (loading) return <p className="muted">Loading...</p>;
+
+  return (
+    <div>
+      <div className="toolbar">
+        <h2 className="display">Announcements</h2>
+        <button className="btn btn-primary" onClick={() => setAdding(true)}>
+          <Plus size={16} /> New Announcement
+        </button>
+      </div>
+
+      {list.length === 0 && (
+        <div className="empty">
+          <Megaphone size={48} color="#999" />
+          <h3>No announcements yet</h3>
+          <p className="muted">Send updates to all your students and parents.</p>
+        </div>
+      )}
+
+      <div className="list">
+        {list.map(a => (
+          <div key={a._id} className="announcement-card">
+            <div>
+              {a.type === 'off-day' ? (
+                <span className="badge red"><CalendarOff size={12} /> Off Day</span>
+              ) : (
+                <span className="badge blue"><MessageSquare size={12} /> General</span>
+              )}
+              <p>{a.message}</p>
+              {a.dates && a.dates.length > 0 && (
+                <p className="small muted">Dates: {a.dates.join(', ')}</p>
+              )}
+              <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
+            </div>
+            <button className="icon-btn icon-btn-danger" onClick={() => del(a._id)}>
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {adding && (
+        <Modal onClose={() => setAdding(false)} title="Send Announcement">
+          <label>Type</label>
+          <div className="radio-group">
+            <label className="radio-label">
+              <input type="radio" value="general" checked={type === 'general'} onChange={e => setType(e.target.value)} />
+              <span>General Message</span>
+            </label>
+            <label className="radio-label">
+              <input type="radio" value="off-day" checked={type === 'off-day'} onChange={e => setType(e.target.value)} />
+              <span>Off-day (Holiday)</span>
+            </label>
+          </div>
+          <label>Message</label>
+          <textarea value={message} onChange={e => setMessage(e.target.value)} rows={3} placeholder="Your message to students and parents" />
+          {type === 'off-day' && (
+            <>
+              <label>Dates (comma-separated, format: YYYY-MM-DD)</label>
+              <input value={dates} onChange={e => setDates(e.target.value)} placeholder="2026-01-26, 2026-08-15" />
+            </>
+          )}
+          <div className="modal-buttons">
+            <button className="btn btn-outline" onClick={() => setAdding(false)}>Cancel</button>
+            <button className="btn btn-primary" onClick={send}>
+              <Send size={14} /> Send to All
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function SettingsTab({ info }) {
+  const [form, setForm] = useState(info);
+  const [subjectInput, setSubjectInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+  const [pwds, setPwds] = useState({ teacherPassword: '', studentPassword: '', parentPassword: '' });
+
+  useEffect(() => { setForm(info); }, [info]);
+
+  const save = async () => {
+    setSaving(true);
     try {
-      await API.delete(`/students/${student._id}`);
-      onDelete();
-      showToast(`${student.name} deleted`);
+      const body = { ...form };
+      if (showPwd) {
+        if (pwds.teacherPassword) body.teacherPassword = pwds.teacherPassword;
+        if (pwds.studentPassword) body.studentPassword = pwds.studentPassword;
+        if (pwds.parentPassword) body.parentPassword = pwds.parentPassword;
+      }
+      await api.put('/config', body);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      setPwds({ teacherPassword: '', studentPassword: '', parentPassword: '' });
+      setShowPwd(false);
     } catch (err) {
-      showToast(err.response?.data?.error || 'Delete failed', 'error');
-    }
+      alert('Failed: ' + (err.response?.data?.error || err.message));
+    } finally { setSaving(false); }
+  };
+
+  const addSubject = () => {
+    if (!subjectInput.trim()) return;
+    setForm(f => ({ ...f, subjects: [...(f.subjects || []), subjectInput.trim()] }));
+    setSubjectInput('');
+  };
+
+  const removeSubject = (s) => {
+    setForm(f => ({ ...f, subjects: (f.subjects || []).filter(x => x !== s) }));
   };
 
   return (
-    <div className="card" style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: '600', fontSize: '16px' }}>{student.name}</div>
-        <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>
-          {student.rollNumber} • {student.phone} • {(student.subjects || []).join(', ')}
-        </div>
+    <div className="container-narrow">
+      <h2 className="display">Coaching Center Settings</h2>
+      <label>Coaching Name</label>
+      <input value={form.classroomName || ''} onChange={e => setForm({...form, classroomName: e.target.value})} />
+      <label>Teacher Name</label>
+      <input value={form.teacherName || ''} onChange={e => setForm({...form, teacherName: e.target.value})} />
+      <label>Phone</label>
+      <input value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+      <label>Email</label>
+      <input value={form.email || ''} onChange={e => setForm({...form, email: e.target.value})} />
+      <label>Map URL (Google Maps link)</label>
+      <input value={form.mapUrl || ''} onChange={e => setForm({...form, mapUrl: e.target.value})} />
+      <label>Class Start Time</label>
+      <input type="time" value={form.classStart || ''} onChange={e => setForm({...form, classStart: e.target.value})} />
+      <label>Class End Time</label>
+      <input type="time" value={form.classEnd || ''} onChange={e => setForm({...form, classEnd: e.target.value})} />
+
+      <label>Subjects Taught</label>
+      <div className="chip-group">
+        {(form.subjects || []).map(s => (
+          <span key={s} className="chip">
+            {s} <button onClick={() => removeSubject(s)}><X size={12} /></button>
+          </span>
+        ))}
       </div>
-      <button onClick={deleteStudent} className="btn btn-ghost btn-sm" style={{ color: 'var(--error)' }}>
-        <Trash2 size={14} />
+      <div className="row">
+        <input value={subjectInput} onChange={e => setSubjectInput(e.target.value)} placeholder="Add a subject" onKeyDown={e => e.key === 'Enter' && addSubject()} />
+        <button className="btn btn-outline" onClick={addSubject}>
+          <Plus size={14} /> Add
+        </button>
+      </div>
+
+      <hr />
+
+      <div className="row">
+        <h3>Change Passwords</h3>
+        <button className="btn-link" onClick={() => setShowPwd(!showPwd)}>
+          {showPwd ? 'Cancel' : 'Change passwords'}
+        </button>
+      </div>
+      {showPwd && (
+        <>
+          <label>New Teacher Password</label>
+          <input type="text" value={pwds.teacherPassword} onChange={e => setPwds({...pwds, teacherPassword: e.target.value})} placeholder="Leave blank to keep current" />
+          <label>New Student Password</label>
+          <input type="text" value={pwds.studentPassword} onChange={e => setPwds({...pwds, studentPassword: e.target.value})} placeholder="Leave blank to keep current" />
+          <label>New Parent Password</label>
+          <input type="text" value={pwds.parentPassword} onChange={e => setPwds({...pwds, parentPassword: e.target.value})} placeholder="Leave blank to keep current" />
+        </>
+      )}
+
+      <button className="btn btn-primary btn-block" onClick={save} disabled={saving}>
+        <Save size={14} /> {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Settings'}
       </button>
     </div>
   );
 }
 
-function AddStudentForm({ onSuccess, showToast }) {
-  const [data, setData] = useState({ name: '', rollNumber: '', phone: '', parentPhone: '', aadhar: '', subjects: [] });
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!data.name || !data.rollNumber || !data.phone) return showToast('Fill required fields', 'error');
-
-    setLoading(true);
-    try {
-      await API.post('/students', data);
-      onSuccess();
-      showToast(`${data.name} added successfully`);
-    } catch (err) {
-      showToast(err.response?.data?.error || 'Failed to add student', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
-      <h3 className="display" style={{ fontSize: '16px', marginBottom: '16px' }}>Add New Student</h3>
-      <form onSubmit={submit} style={{ display: 'grid', gap: '12px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <Field label="Name">
-            <input className="input" value={data.name} onChange={(e) => setData({ ...data, name: e.target.value })} required />
-          </Field>
-          <Field label="Roll Number">
-            <input className="input" value={data.rollNumber} onChange={(e) => setData({ ...data, rollNumber: e.target.value })} required />
-          </Field>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <Field label="Phone">
-            <input className="input" value={data.phone} onChange={(e) => setData({ ...data, phone: e.target.value })} required />
-          </Field>
-          <Field label="Parent Phone">
-            <input className="input" value={data.parentPhone} onChange={(e) => setData({ ...data, parentPhone: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Subjects (comma separated)">
-          <input className="input" value={data.subjects.join(', ')} onChange={(e) => setData({ ...data, subjects: e.target.value.split(',').map(s => s.trim()) })} />
-        </Field>
-        <button type="submit" disabled={loading} className="btn btn-primary">
-          {loading ? 'Adding...' : 'Add Student'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function AnnouncementsView({ showToast }) {
-  const [announcements, setAnnouncements] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState('');
-  const [type, setType] = useState('general');
-
-  useEffect(() => {
-    fetchAnnouncements();
-  }, []);
-
-  const fetchAnnouncements = async () => {
-    try {
-      const res = await API.get('/announcements');
-      setAnnouncements(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const send = async (e) => {
-    e.preventDefault();
-    if (!message.trim()) return showToast('Enter a message', 'error');
-
-    try {
-      await API.post('/announcements', { message, type, dates: [] });
-      setMessage('');
-      fetchAnnouncements();
-      showToast('Announcement sent!');
-    } catch (err) {
-      showToast(err.response?.data?.error || 'Failed', 'error');
-    }
-  };
-
-  return (
-    <div>
-      <h2 className="display" style={{ fontSize: '22px', marginBottom: '20px' }}>Announcements</h2>
-
-      <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
-        <h3 className="display" style={{ fontSize: '16px', marginBottom: '16px' }}>Send Announcement</h3>
-        <form onSubmit={send}>
-          <Field label="Message">
-            <textarea
-              className="textarea"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="e.g., Test on Monday or Holiday tomorrow"
-              rows={3}
-            />
-          </Field>
-          <button type="submit" className="btn btn-primary">
-            <Send size={14} /> Send to All
-          </button>
-        </form>
-      </div>
-
-      <div>
-        <h3 className="display" style={{ fontSize: '16px', marginBottom: '12px' }}>Sent ({announcements.length})</h3>
-        <div style={{ display: 'grid', gap: '12px' }}>
-          {announcements.map((a) => (
-            <div key={a._id} className="card" style={{ padding: '16px' }}>
-              <p style={{ marginBottom: '8px' }}>{a.message}</p>
-              <div style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>
-                {new Date(a.createdAt).toLocaleString()}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =====================================================================
+// ============================
 // STUDENT DASHBOARD
-// =====================================================================
-function StudentDashboard({ studentId, studentName, onLogout, showToast }) {
-  const [today, setToday] = useState(null);
-  const [allAtt, setAllAtt] = useState([]);
+// ============================
+function StudentDashboard({ student, info, onSignOut }) {
+  const [tab, setTab] = useState('today');
+  const [todayAtt, setTodayAtt] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [announcements, setAnnouncements] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const load = async () => {
+    if (!student) return;
     try {
-      const [attRes, annRes] = await Promise.all([
-        API.get(`/attendance/${studentId}`),
-        API.get('/announcements'),
+      const [hist, summ, anns] = await Promise.all([
+        api.get('/attendance/student/' + student._id),
+        api.get('/attendance/summary/' + student._id),
+        api.get('/announcements'),
       ]);
-      setAllAtt(attRes.data);
-      setAnnouncements(annRes.data);
-      const t = new Date().toISOString().split('T')[0];
-      setToday(attRes.data.find(a => a.date === t) || null);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+      setHistory(hist.data);
+      setSummary(summ.data);
+      setAnnouncements(anns.data);
+      const today = new Date().toISOString().split('T')[0];
+      setTodayAtt(hist.data.find(h => h.date === today));
+    } catch (err) { console.error(err); }
   };
+
+  useEffect(() => { load(); }, [student]);
 
   const checkIn = async () => {
     try {
-      const t = new Date().toISOString().split('T')[0];
-      await API.post('/attendance', { studentId, date: t, action: 'in' });
-      fetchData();
-      showToast('Checked in ✓');
-    } catch (err) {
-      showToast(err.response?.data?.error || 'Failed', 'error');
-    }
+      await api.post('/attendance/check', { studentId: student._id, action: 'in' });
+      load();
+    } catch (err) { alert('Failed: ' + err.message); }
   };
 
   const checkOut = async () => {
     try {
-      const t = new Date().toISOString().split('T')[0];
-      await API.post('/attendance', { studentId, date: t, action: 'out' });
-      fetchData();
-      showToast('Checked out ✓');
-    } catch (err) {
-      showToast(err.response?.data?.error || 'Failed', 'error');
-    }
+      await api.post('/attendance/check', { studentId: student._id, action: 'out' });
+      load();
+    } catch (err) { alert('Failed: ' + err.message); }
   };
 
-  if (loading) {
-    return <div className="container mt-4" style={{ color: 'var(--ink-soft)' }}>Loading...</div>;
-  }
-
-  const presentDays = allAtt.filter(a => a.status === 'present').length;
-
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      {/* Header */}
-      <header style={{
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        padding: '16px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-      }}>
-        <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h1 className="display" style={{ fontSize: '18px' }}>Hi, {studentName.split(' ')[0]} 👋</h1>
-            <p style={{ fontSize: '11px', color: 'var(--ink-soft)', marginTop: '2px' }}>Student Dashboard</p>
-          </div>
-          <button onClick={onLogout} className="btn btn-ghost btn-sm">
-            <LogOut size={14} /> Sign out
-          </button>
+    <div className="page">
+      <header className="dashboard-header">
+        <div>
+          <h1 className="display">Hi, {student?.name}</h1>
+          <p className="muted">Roll #{student?.rollNumber}</p>
         </div>
+        <button className="btn btn-outline" onClick={onSignOut}>
+          <LogOut size={16} /> Sign out
+        </button>
       </header>
 
-      <main style={{ maxWidth: '900px', margin: '0 auto', padding: '24px 20px' }}>
-        {/* Check In/Out Card */}
-        <div className="card" style={{ padding: '32px', marginBottom: '24px', textAlign: 'center' }}>
-          <h2 className="display" style={{ fontSize: '20px', marginBottom: '8px' }}>
-            {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'short', day: 'numeric' })}
-          </h2>
+      <nav className="tabs">
+        <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}>
+          <Calendar size={16} /> Today
+        </button>
+        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>
+          <BarChart3 size={16} /> My Attendance
+        </button>
+        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
+          <Megaphone size={16} /> Updates
+        </button>
+        <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}>
+          <Info size={16} /> Class Info
+        </button>
+      </nav>
 
-          {!today ? (
-            <button onClick={checkIn} className="btn btn-primary" style={{ padding: '16px 32px', fontSize: '16px', marginTop: '20px' }}>
-              <Check size={18} /> Tap to Check In
-            </button>
-          ) : !today.outTime ? (
-            <div style={{ marginTop: '20px' }}>
-              <div style={{
-                background: 'var(--success-soft)',
-                color: 'var(--success)',
-                padding: '12px',
-                borderRadius: '10px',
-                marginBottom: '12px',
-                fontWeight: '600',
-              }}>
-                ✓ You checked in at {today.inTime}
+      <main className="tab-content">
+        {tab === 'today' && (
+          <div className="center-content">
+            <h2 className="display">
+              {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </h2>
+            {todayAtt ? (
+              <div className="big-card green">
+                <CheckCircle size={48} />
+                <h3>You're marked Present!</h3>
+                {todayAtt.inTime && <p>Checked in at: <strong>{todayAtt.inTime}</strong></p>}
+                {todayAtt.outTime && <p>Checked out at: <strong>{todayAtt.outTime}</strong></p>}
+                {todayAtt.markedBy === 'teacher' && <p className="small">Marked by your teacher</p>}
+                <div className="row-center">
+                  {!todayAtt.outTime && (
+                    <button className="btn btn-primary btn-lg" onClick={checkOut}>
+                      <Clock size={18} /> Check Out
+                    </button>
+                  )}
+                </div>
               </div>
-              <button onClick={checkOut} className="btn btn-primary w-full">
-                <Clock size={16} /> Tap to Check Out
-              </button>
-            </div>
-          ) : (
-            <div style={{
-              background: 'var(--success-soft)',
-              color: 'var(--success)',
-              padding: '12px',
-              borderRadius: '10px',
-              marginTop: '20px',
-              fontWeight: '600',
-            }}>
-              ✓ All done for today! ({today.inTime} – {today.outTime})
-            </div>
-          )}
-        </div>
+            ) : (
+              <div className="big-card">
+                <Clock size={48} />
+                <h3>Ready to mark your attendance?</h3>
+                <p className="muted">Tap below when you arrive at class</p>
+                <button className="btn btn-primary btn-lg" onClick={checkIn}>
+                  <CheckCircle size={18} /> Check In Now
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Stats */}
-        <div className="card" style={{ padding: '24px', marginBottom: '24px', textAlign: 'center' }}>
-          <div style={{ fontSize: '40px', fontWeight: '700', color: 'var(--accent)' }}>{presentDays}</div>
-          <div style={{ fontSize: '13px', color: 'var(--ink-soft)', marginTop: '8px' }}>Days Present</div>
-        </div>
+        {tab === 'history' && summary && (
+          <div>
+            <div className="summary-stats">
+              <div className="stat-big green">
+                <strong>{summary.present}</strong>
+                <span>Days Present</span>
+              </div>
+              <div className="stat-big red">
+                <strong>{summary.absent}</strong>
+                <span>Days Absent</span>
+              </div>
+              <div className="stat-big blue">
+                <strong>{summary.percentage}%</strong>
+                <span>Attendance</span>
+              </div>
+            </div>
+            <h3>Recent History</h3>
+            <div className="list">
+              {history.length === 0 && <p className="muted">No records yet.</p>}
+              {history.map(h => (
+                <div key={h._id} className="history-row">
+                  <strong>{h.date}</strong>
+                  {h.status === 'present' ? (
+                    <span className="badge green small">
+                      <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
+                    </span>
+                  ) : (
+                    <span className="badge red small">
+                      <XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-        {/* Announcements */}
-        {announcements.length > 0 && (
-          <div style={{ marginBottom: '24px' }}>
-            <h3 className="display" style={{ fontSize: '16px', marginBottom: '12px' }}>📢 Announcements</h3>
-            <div style={{ display: 'grid', gap: '10px' }}>
-              {announcements.slice(0, 3).map((a) => (
-                <div key={a._id} className="card" style={{ padding: '12px' }}>
-                  <p style={{ marginBottom: '4px', fontWeight: '600' }}>{a.message}</p>
-                  <div style={{ fontSize: '10px', color: 'var(--ink-soft)' }}>
-                    {new Date(a.createdAt).toLocaleDateString()}
+        {tab === 'announcements' && (
+          <div>
+            <h2 className="display">Updates from your teacher</h2>
+            {announcements.length === 0 && (
+              <div className="empty">
+                <Megaphone size={48} color="#999" />
+                <p className="muted">No announcements yet.</p>
+              </div>
+            )}
+            <div className="list">
+              {announcements.map(a => (
+                <div key={a._id} className="announcement-card">
+                  <div>
+                    {a.type === 'off-day' ? (
+                      <span className="badge red"><CalendarOff size={12} /> Holiday</span>
+                    ) : (
+                      <span className="badge blue"><MessageSquare size={12} /> Update</span>
+                    )}
+                    <p>{a.message}</p>
+                    {a.dates && a.dates.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
+                    <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
                   </div>
                 </div>
               ))}
@@ -1246,125 +1239,169 @@ function StudentDashboard({ studentId, studentName, onLogout, showToast }) {
           </div>
         )}
 
-        {/* Attendance History */}
-        <div>
-          <h3 className="display" style={{ fontSize: '16px', marginBottom: '12px' }}>📊 Recent Attendance</h3>
-          <div style={{ display: 'grid', gap: '10px' }}>
-            {allAtt.slice(0, 10).map((a) => (
-              <div key={a._id} className="card" style={{ padding: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  background: a.status === 'present' ? 'var(--success)' : 'var(--error)',
-                }}/>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: '600', fontSize: '13px' }}>
-                    {new Date(a.date).toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>
-                    {a.status === 'present' ? `${a.inTime} – ${a.outTime || 'pending'}` : 'Absent'}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {tab === 'info' && <ClassInfo info={info} />}
       </main>
     </div>
   );
 }
 
-// =====================================================================
+// ============================
 // PARENT DASHBOARD
-// =====================================================================
-function ParentDashboard({ studentId, studentName, onLogout, showToast }) {
-  const [allAtt, setAllAtt] = useState([]);
+// ============================
+function ParentDashboard({ student, info, onSignOut }) {
+  const [tab, setTab] = useState('summary');
+  const [history, setHistory] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [announcements, setAnnouncements] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
+  const load = async () => {
+    if (!student) return;
     try {
-      const [attRes, annRes, configRes] = await Promise.all([
-        API.get(`/attendance/${studentId}`),
-        API.get('/announcements'),
-        API.get('/config'),
+      const [hist, summ, anns] = await Promise.all([
+        api.get('/attendance/student/' + student._id),
+        api.get('/attendance/summary/' + student._id),
+        api.get('/announcements'),
       ]);
-      setAllAtt(attRes.data);
-      setAnnouncements(annRes.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+      setHistory(hist.data);
+      setSummary(summ.data);
+      setAnnouncements(anns.data);
+    } catch (err) { console.error(err); }
   };
 
-  if (loading) {
-    return <div className="container mt-4" style={{ color: 'var(--ink-soft)' }}>Loading...</div>;
-  }
+  useEffect(() => { load(); }, [student]);
 
-  const presentDays = allAtt.filter(a => a.status === 'present').length;
-  const totalDays = allAtt.length;
-  const percentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+  const today = new Date().toISOString().split('T')[0];
+  const todayAtt = history.find(h => h.date === today);
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      {/* Header */}
-      <header style={{
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--border)',
-        padding: '16px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-      }}>
-        <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h1 className="display" style={{ fontSize: '18px' }}>👨‍👩‍👧 {studentName}</h1>
-            <p style={{ fontSize: '11px', color: 'var(--ink-soft)', marginTop: '2px' }}>Parent View</p>
-          </div>
-          <button onClick={onLogout} className="btn btn-ghost btn-sm">
-            <LogOut size={14} /> Sign out
-          </button>
+    <div className="page">
+      <header className="dashboard-header">
+        <div>
+          <h1 className="display">{student?.name}'s Attendance</h1>
+          <p className="muted">Roll #{student?.rollNumber}</p>
         </div>
+        <button className="btn btn-outline" onClick={onSignOut}>
+          <LogOut size={16} /> Sign out
+        </button>
       </header>
 
-      <main style={{ maxWidth: '900px', margin: '0 auto', padding: '24px 20px' }}>
-        {/* Stats */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '16px',
-          marginBottom: '24px',
-        }}>
-          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-            <div style={{ fontSize: '36px', fontWeight: '700', color: 'var(--accent)' }}>{presentDays}</div>
-            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>Days Present</div>
-          </div>
-          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-            <div style={{ fontSize: '36px', fontWeight: '700', color: 'var(--success)' }}>{percentage}%</div>
-            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>Attendance %</div>
-          </div>
-          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-            <div style={{ fontSize: '36px', fontWeight: '700', color: 'var(--ink)' }}>{totalDays}</div>
-            <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>Total Days</div>
-          </div>
-        </div>
+      <nav className="tabs">
+        <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}>
+          <BarChart3 size={16} /> Summary
+        </button>
+        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>
+          <Calendar size={16} /> History
+        </button>
+        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
+          <Megaphone size={16} /> Updates
+        </button>
+        <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}>
+          <Info size={16} /> Class Info
+        </button>
+      </nav>
 
-        {/* Announcements */}
-        {announcements.length > 0 && (
-          <div style={{ marginBottom: '24px' }}>
-            <h3 className="display" style={{ fontSize: '16px', marginBottom: '12px' }}>📢 Important Notices</h3>
-            <div style={{ display: 'grid', gap: '10px' }}>
-              {announcements.map((a) => (
-                <div key={a._id} className="card" style={{ padding: '14px', background: 'var(--accent-soft)', border: 'none' }}>
-                  <p style={{ marginBottom: '4px', fontWeight: '600', color: 'var(--accent-deep)' }}>{a.message}</p>
-                  <div style={{ fontSize: '10px', color: 'var(--accent-deep)', opacity: 0.7 }}>
-                    {new Date(a.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+      <main className="tab-content">
+        {tab === 'summary' && summary && (
+          <div>
+            <div className="today-status">
+              {todayAtt ? (
+                <div className={'big-card ' + (todayAtt.status === 'present' ? 'green' : 'red')}>
+                  {todayAtt.status === 'present' ? <CheckCircle size={48} /> : <XCircle size={48} />}
+                  <h3>Today: {todayAtt.status === 'present' ? 'Present' : 'Absent'}</h3>
+                  {todayAtt.inTime && <p>Checked in at: <strong>{todayAtt.inTime}</strong></p>}
+                  {todayAtt.outTime && <p>Checked out at: <strong>{todayAtt.outTime}</strong></p>}
+                  {todayAtt.reason && <p>Reason: <strong>{todayAtt.reason}</strong></p>}
+                  {todayAtt.markedBy === 'teacher' && <p className="small">Marked by teacher</p>}
+                  {todayAtt.markedBy === 'self' && <p className="small">Marked by student</p>}
+                </div>
+              ) : (
+                <div className="big-card muted-card">
+                  <Clock size={48} />
+                  <h3>Not marked yet today</h3>
+                  <p className="muted">{student?.name} hasn't checked in yet.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="summary-stats">
+              <div className="stat-big green">
+                <strong>{summary.present}</strong>
+                <span>Days Present</span>
+              </div>
+              <div className="stat-big red">
+                <strong>{summary.absent}</strong>
+                <span>Days Absent</span>
+              </div>
+              <div className="stat-big blue">
+                <strong>{summary.percentage}%</strong>
+                <span>Attendance</span>
+              </div>
+            </div>
+
+            {summary.absentDays && summary.absentDays.length > 0 && (
+              <>
+                <h3>Recent Absences</h3>
+                <div className="list">
+                  {summary.absentDays.slice(0, 5).map((a, i) => (
+                    <div key={i} className="history-row">
+                      <strong>{a.date}</strong>
+                      <span className="small muted">{a.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === 'history' && (
+          <div>
+            <h3>Full Attendance Record</h3>
+            <div className="list">
+              {history.length === 0 && <p className="muted">No records yet.</p>}
+              {history.map(h => (
+                <div key={h._id} className="history-row">
+                  <div>
+                    <strong>{h.date}</strong>
+                    {h.status === 'present' ? (
+                      <span className="badge green small">
+                        <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
+                      </span>
+                    ) : (
+                      <span className="badge red small">
+                        <XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}
+                      </span>
+                    )}
+                  </div>
+                  {h.markedBy === 'teacher' && <span className="small muted">Marked by teacher</span>}
+                  {h.markedBy === 'self' && <span className="small muted">Self-marked</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === 'announcements' && (
+          <div>
+            <h2 className="display">Updates from the teacher</h2>
+            {announcements.length === 0 && (
+              <div className="empty">
+                <Megaphone size={48} color="#999" />
+                <p className="muted">No announcements yet.</p>
+              </div>
+            )}
+            <div className="list">
+              {announcements.map(a => (
+                <div key={a._id} className="announcement-card">
+                  <div>
+                    {a.type === 'off-day' ? (
+                      <span className="badge red"><CalendarOff size={12} /> Holiday</span>
+                    ) : (
+                      <span className="badge blue"><MessageSquare size={12} /> Update</span>
+                    )}
+                    <p>{a.message}</p>
+                    {a.dates && a.dates.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
+                    <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
                   </div>
                 </div>
               ))}
@@ -1372,60 +1409,68 @@ function ParentDashboard({ studentId, studentName, onLogout, showToast }) {
           </div>
         )}
 
-        {/* Attendance Table */}
-        <div>
-          <h3 className="display" style={{ fontSize: '16px', marginBottom: '12px' }}>📊 Full Attendance Record</h3>
-          {allAtt.length === 0 ? (
-            <div className="card" style={{ padding: '20px', textAlign: 'center', color: 'var(--ink-soft)' }}>
-              No attendance records yet
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: '8px' }}>
-              {allAtt.map((a) => (
-                <div key={a._id} className="card" style={{ padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: a.status === 'present' ? 'var(--success)' : 'var(--error)',
-                    }}/>
-                    <div>
-                      <div style={{ fontWeight: '600', fontSize: '13px' }}>
-                        {new Date(a.date).toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric', year: '2-digit' })}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--ink-soft)' }}>
-                        {a.status === 'present' ? `${a.inTime} – ${a.outTime || 'pending'}` : a.reason || 'Absent'}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="tag" style={{
-                    background: a.status === 'present' ? 'var(--success-soft)' : 'var(--error-soft)',
-                    color: a.status === 'present' ? 'var(--success)' : 'var(--error)',
-                    padding: '4px 8px',
-                    fontSize: '11px',
-                  }}>
-                    {a.status === 'present' ? '✓' : '✗'} {a.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {tab === 'info' && <ClassInfo info={info} />}
       </main>
     </div>
   );
 }
 
-// =====================================================================
-// FIELD COMPONENT
-// =====================================================================
-function Field({ label, children, hint }) {
+// ============================
+// SHARED: CLASS INFO
+// ============================
+function ClassInfo({ info }) {
   return (
-    <div style={{ marginBottom: '16px' }}>
-      {label && <label className="label">{label}</label>}
-      {children}
-      {hint && <div style={{ fontSize: '12px', color: 'var(--ink-soft)', marginTop: '4px' }}>{hint}</div>}
+    <div className="container-narrow">
+      <h2 className="display">{info.classroomName || 'Coaching Center'}</h2>
+      <div className="info-grid">
+        {info.teacherName && (
+          <div className="info-row">
+            <User size={18} /><span>Teacher: {info.teacherName}</span>
+          </div>
+        )}
+        {info.phone && (
+          <div className="info-row">
+            <Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a>
+          </div>
+        )}
+        {info.email && (
+          <div className="info-row">
+            <Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a>
+          </div>
+        )}
+        {info.mapUrl && (
+          <div className="info-row">
+            <MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location on Map</a>
+          </div>
+        )}
+        {info.classStart && info.classEnd && (
+          <div className="info-row">
+            <Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span>
+          </div>
+        )}
+        {info.subjects && info.subjects.length > 0 && (
+          <div className="info-row">
+            <BookOpen size={18} /><span>Subjects: {info.subjects.join(', ')}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================
+// SHARED: MODAL
+// ============================
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{title}</h3>
+          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
     </div>
   );
 }

@@ -5,8 +5,7 @@ import {
   Plus, Trash2, Edit2, Save, X, Search,
   ChevronRight, ArrowLeft, CheckCircle, XCircle,
   AlertTriangle, Info, BarChart3, MessageSquare, Send,
-  Megaphone, Eye, EyeOff, BookOpen, Settings,
-  IndianRupee, Wallet, TrendingUp, TrendingDown, Receipt
+  Megaphone, Eye, EyeOff, BookOpen, Settings
 } from 'lucide-react';
 import axios from 'axios';
 import './index.css';
@@ -22,19 +21,6 @@ api.interceptors.request.use(config => {
 });
 
 // ============================
-// HELPERS
-// ============================
-const fmtINR = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', {
-  minimumFractionDigits: 0, maximumFractionDigits: 2
-});
-const currentMonthKey = () => new Date().toISOString().slice(0, 7);
-const formatMonthLabel = (m) => {
-  if (!m) return '';
-  const [y, mo] = m.split('-').map(Number);
-  return new Date(y, mo - 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-};
-
-// ============================
 // MAIN APP
 // ============================
 export default function App() {
@@ -47,8 +33,10 @@ export default function App() {
   );
 
   useEffect(() => {
+    // Load public coaching info
     api.get('/public/info').then(r => setInfo(r.data)).catch(() => {});
 
+    // Resume session
     const savedRole = localStorage.getItem('role');
     const savedStudent = JSON.parse(localStorage.getItem('selectedStudent') || 'null');
     if (savedRole === 'teacher') setView('teacher');
@@ -129,7 +117,7 @@ function Landing({ info, onSignIn, onRegister }) {
           <div className="card">
             <Settings size={32} color="#dc2626" />
             <h3>Teacher Controls Everything</h3>
-            <p>Manage students, fees, send announcements, and view reports.</p>
+            <p>Manage students, send announcements, and view reports.</p>
           </div>
         </div>
       </section>
@@ -138,19 +126,29 @@ function Landing({ info, onSignIn, onRegister }) {
         <h2 className="display">About Us</h2>
         <div className="info-grid">
           {info.teacherName && (
-            <div className="info-row"><User size={18} /><span>{info.teacherName}</span></div>
+            <div className="info-row">
+              <User size={18} /><span>{info.teacherName}</span>
+            </div>
           )}
           {info.phone && (
-            <div className="info-row"><Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a></div>
+            <div className="info-row">
+              <Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a>
+            </div>
           )}
           {info.email && (
-            <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>
+            <div className="info-row">
+              <Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a>
+            </div>
           )}
           {info.mapUrl && (
-            <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a></div>
+            <div className="info-row">
+              <MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a>
+            </div>
           )}
           {info.classStart && info.classEnd && (
-            <div className="info-row"><Clock size={18} /><span>Class hours: {info.classStart} - {info.classEnd}</span></div>
+            <div className="info-row">
+              <Clock size={18} /><span>Class hours: {info.classStart} - {info.classEnd}</span>
+            </div>
           )}
         </div>
       </section>
@@ -303,7 +301,6 @@ function Register({ info, onBack, onDone }) {
     );
   }
 
-  // info.subjects is always an array of strings (public endpoint strips prices)
   const availableSubjects = info.subjects && info.subjects.length ? info.subjects : ['Mathematics', 'Science', 'English'];
 
   return (
@@ -361,7 +358,7 @@ function Register({ info, onBack, onDone }) {
 }
 
 // ============================
-// PICK STUDENT
+// PICK STUDENT (after student/parent login)
 // ============================
 function PickStudent({ students, role, onPick, onBack }) {
   const [search, setSearch] = useState('');
@@ -430,9 +427,6 @@ function TeacherDashboard({ info, onSignOut }) {
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}>
           <BarChart3 size={16} /> Summary
         </button>
-        <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}>
-          <Wallet size={16} /> Fees
-        </button>
         <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
           <Megaphone size={16} /> Announcements
         </button>
@@ -445,9 +439,8 @@ function TeacherDashboard({ info, onSignOut }) {
         {tab === 'today' && <TodayTab info={info} />}
         {tab === 'students' && <StudentsTab info={info} />}
         {tab === 'summary' && <SummaryTab />}
-        {tab === 'fees' && <FeesTab />}
         {tab === 'announcements' && <AnnouncementsTab />}
-        {tab === 'settings' && <SettingsTab />}
+        {tab === 'settings' && <SettingsTab info={info} />}
       </main>
     </div>
   );
@@ -514,7 +507,9 @@ function TodayTab({ info }) {
   return (
     <div>
       <div className="stat-row">
-        <div className="stat"><strong>{today}</strong></div>
+        <div className="stat">
+          <strong>{today}</strong>
+        </div>
         <div className="stat green">
           <CheckCircle size={20} /> {todayAtt.filter(a => a.status === 'present').length} Present
         </div>
@@ -596,24 +591,19 @@ function StudentsTab({ info }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [config, setConfig] = useState(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [s, c] = await Promise.all([
-        api.get('/students'),
-        api.get('/config'),
-      ]);
-      setStudents(s.data);
-      setConfig(c.data);
+      const r = await api.get('/students');
+      setStudents(r.data);
     } finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
 
   const del = async (id) => {
-    if (!confirm('Delete this student? All their attendance and payment records will also be deleted.')) return;
+    if (!confirm('Delete this student? All their attendance records will also be deleted.')) return;
     await api.delete('/students/' + id);
     load();
   };
@@ -658,9 +648,6 @@ function StudentsTab({ info }) {
               {s.registeredVia === 'self' && (
                 <span className="badge blue small">Self-registered</span>
               )}
-              {s.discountPercent > 0 && (
-                <span className="badge yellow small">{s.discountPercent}% discount</span>
-              )}
             </div>
             <div className="row-buttons">
               <button className="icon-btn" onClick={() => setEditing(s)} title="Edit">
@@ -676,7 +663,7 @@ function StudentsTab({ info }) {
 
       {(adding || editing) && (
         <StudentForm
-          config={config}
+          info={info}
           student={editing}
           onClose={() => { setAdding(false); setEditing(null); }}
           onSaved={() => { setAdding(false); setEditing(null); load(); }}
@@ -686,34 +673,22 @@ function StudentsTab({ info }) {
   );
 }
 
-function StudentForm({ config, student, onClose, onSaved }) {
+function StudentForm({ info, student, onClose, onSaved }) {
   const [form, setForm] = useState(student || {
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', subjects: [], notes: '', discountPercent: 0
+    aadhar: '', subjects: [], notes: ''
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // config.subjects is array of {name, pricePerMonth}
-  const availableSubjects = (config?.subjects && config.subjects.length)
-    ? config.subjects
-    : [{ name: 'Mathematics', pricePerMonth: 0 }, { name: 'Science', pricePerMonth: 0 }, { name: 'English', pricePerMonth: 0 }];
-
-  const toggleSubject = (name) => {
+  const toggleSubject = (s) => {
     setForm(f => ({
       ...f,
-      subjects: (f.subjects || []).includes(name)
-        ? f.subjects.filter(x => x !== name)
-        : [...(f.subjects || []), name]
+      subjects: (f.subjects || []).includes(s)
+        ? f.subjects.filter(x => x !== s)
+        : [...(f.subjects || []), s]
     }));
   };
-
-  // Calculate estimated monthly fee preview
-  const monthlyEstimate = (form.subjects || []).reduce((sum, name) => {
-    const subj = availableSubjects.find(s => s.name === name);
-    return sum + (subj?.pricePerMonth || 0);
-  }, 0);
-  const afterDiscount = monthlyEstimate * (1 - (Number(form.discountPercent) || 0) / 100);
 
   const save = async () => {
     setError('');
@@ -723,17 +698,18 @@ function StudentForm({ config, student, onClose, onSaved }) {
     }
     setSaving(true);
     try {
-      const payload = { ...form, discountPercent: Number(form.discountPercent) || 0 };
       if (student) {
-        await api.put('/students/' + student._id, payload);
+        await api.put('/students/' + student._id, form);
       } else {
-        await api.post('/students', payload);
+        await api.post('/students', form);
       }
       onSaved();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save');
     } finally { setSaving(false); }
   };
+
+  const availableSubjects = info.subjects && info.subjects.length ? info.subjects : ['Mathematics', 'Science', 'English'];
 
   return (
     <Modal onClose={onClose} title={student ? 'Edit Student' : 'Add New Student'}>
@@ -747,42 +723,19 @@ function StudentForm({ config, student, onClose, onSaved }) {
       <input value={form.parentPhone || ''} onChange={e => setForm({...form, parentPhone: e.target.value})} />
       <label>Aadhar (12 digits)</label>
       <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value})} maxLength={12} />
-
-      <label>Subjects (prices shown — visible to you only)</label>
+      <label>Subjects</label>
       <div className="checkbox-group">
         {availableSubjects.map(s => (
-          <label key={s.name} className="checkbox-label">
+          <label key={s} className="checkbox-label">
             <input
               type="checkbox"
-              checked={(form.subjects || []).includes(s.name)}
-              onChange={() => toggleSubject(s.name)}
+              checked={(form.subjects || []).includes(s)}
+              onChange={() => toggleSubject(s)}
             />
-            <span>
-              {s.name}
-              {s.pricePerMonth > 0 && (
-                <span className="muted small"> · {fmtINR(s.pricePerMonth)}/mo</span>
-              )}
-            </span>
+            <span>{s}</span>
           </label>
         ))}
       </div>
-
-      {monthlyEstimate > 0 && (
-        <div className="fee-preview">
-          <Wallet size={16} />
-          <span>
-            Monthly fee: <strong>{fmtINR(monthlyEstimate)}</strong>
-            {form.discountPercent > 0 && (
-              <> · After {form.discountPercent}% discount: <strong>{fmtINR(afterDiscount)}</strong></>
-            )}
-          </span>
-        </div>
-      )}
-
-      <label>Discount % (optional)</label>
-      <input type="number" min="0" max="100" value={form.discountPercent || 0}
-        onChange={e => setForm({...form, discountPercent: e.target.value})} placeholder="0" />
-
       <label>Notes</label>
       <textarea value={form.notes || ''} onChange={e => setForm({...form, notes: e.target.value})} rows={3} />
       {error && <div className="error-box">{error}</div>}
@@ -913,295 +866,6 @@ function SummaryTab() {
   );
 }
 
-// ============================
-// FEES TAB (NEW)
-// ============================
-function FeesTab() {
-  const [month, setMonth] = useState(currentMonthKey());
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all'); // all | due | paid
-  const [detailStudent, setDetailStudent] = useState(null);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const r = await api.get('/fees/all?month=' + month);
-      setData(r.data);
-    } catch (err) {
-      console.error(err);
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, [month]);
-
-  if (loading) return <p className="muted">Loading fees...</p>;
-
-  if (!data || data.students.length === 0) {
-    return (
-      <div className="empty">
-        <Wallet size={48} color="#999" />
-        <h3>No fee data yet</h3>
-        <p className="muted">Add students and set subject prices in Settings to start tracking fees.</p>
-      </div>
-    );
-  }
-
-  const list = data.students.filter(s => {
-    if (search && !s.name.toLowerCase().includes(search.toLowerCase()) && !(s.rollNumber || '').includes(search)) return false;
-    if (filter === 'due' && s.due <= 0) return false;
-    if (filter === 'paid' && s.due > 0) return false;
-    return true;
-  });
-
-  // Build month options (current month and 11 previous)
-  const monthOptions = [];
-  const now = new Date();
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    monthOptions.push(d.toISOString().slice(0, 7));
-  }
-
-  return (
-    <div>
-      <div className="toolbar">
-        <h2 className="display">Fees · {formatMonthLabel(data.month)}</h2>
-        <select value={month} onChange={e => setMonth(e.target.value)} style={{ maxWidth: 200 }}>
-          {monthOptions.map(m => (
-            <option key={m} value={m}>{formatMonthLabel(m)}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="summary-stats">
-        <div className="stat-big blue">
-          <strong>{fmtINR(data.summary.billed)}</strong>
-          <span>Total Billed</span>
-        </div>
-        <div className="stat-big green">
-          <strong>{fmtINR(data.summary.collected)}</strong>
-          <span>Collected</span>
-        </div>
-        <div className="stat-big red">
-          <strong>{fmtINR(data.summary.pending)}</strong>
-          <span>Pending ({data.summary.studentsWithDue} students)</span>
-        </div>
-      </div>
-
-      <div className="toolbar">
-        <div className="search-bar">
-          <Search size={16} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students" />
-        </div>
-        <div className="row-buttons">
-          <button className={'btn-mini ' + (filter === 'all' ? 'btn-green' : 'btn-outline')} onClick={() => setFilter('all')}>All</button>
-          <button className={'btn-mini ' + (filter === 'due' ? 'btn-red' : 'btn-outline')} onClick={() => setFilter('due')}>Due</button>
-          <button className={'btn-mini ' + (filter === 'paid' ? 'btn-green' : 'btn-outline')} onClick={() => setFilter('paid')}>Paid up</button>
-        </div>
-      </div>
-
-      <p className="small muted">{data.daysInMonth} days in this month. Click a student for full breakdown.</p>
-
-      <div className="list">
-        {list.length === 0 && <p className="muted text-center">No students match this filter.</p>}
-        {list.map(s => (
-          <button key={s._id} className="fee-card" onClick={() => setDetailStudent(s)}>
-            <div className="fee-card-left">
-              <strong>{s.name}</strong>
-              <p className="muted small">
-                Roll #{s.rollNumber} · {(s.subjects || []).join(', ') || 'No subjects'}
-              </p>
-              <p className="small">
-                {s.daysPresent} days present
-                {s.discountPercent > 0 && <> · {s.discountPercent}% discount</>}
-              </p>
-            </div>
-            <div className="fee-card-right">
-              <div className="fee-amount">{fmtINR(s.totalAfterDiscount)}</div>
-              <div className="small">
-                {s.totalPaid > 0 && <span className="badge green small">Paid {fmtINR(s.totalPaid)}</span>}
-                {s.due > 0
-                  ? <span className="badge red small">Due {fmtINR(s.due)}</span>
-                  : <span className="badge green small">✓ Settled</span>}
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {detailStudent && (
-        <FeeDetailModal
-          student={detailStudent}
-          month={month}
-          onClose={() => setDetailStudent(null)}
-          onChange={load}
-        />
-      )}
-    </div>
-  );
-}
-
-function FeeDetailModal({ student, month, onClose, onChange }) {
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
-  const [payment, setPayment] = useState({ amount: '', method: 'cash', notes: '', paidOn: new Date().toISOString().slice(0, 10) });
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const r = await api.get('/fees/student/' + student._id + '?month=' + month);
-      setDetail(r.data);
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, [student._id, month]);
-
-  const recordPayment = async () => {
-    if (!payment.amount || Number(payment.amount) <= 0) {
-      alert('Enter a valid amount');
-      return;
-    }
-    try {
-      await api.post('/payments', {
-        studentId: student._id,
-        month,
-        amount: Number(payment.amount),
-        method: payment.method,
-        notes: payment.notes,
-        paidOn: payment.paidOn,
-      });
-      setAdding(false);
-      setPayment({ amount: '', method: 'cash', notes: '', paidOn: new Date().toISOString().slice(0, 10) });
-      load();
-      onChange();
-    } catch (err) {
-      alert('Failed: ' + err.message);
-    }
-  };
-
-  const deletePayment = async (id) => {
-    if (!confirm('Delete this payment record?')) return;
-    await api.delete('/payments/' + id);
-    load();
-    onChange();
-  };
-
-  const shareReminderUrl = (phone) => {
-    if (!phone || !detail) return '#';
-    const msg = `Hi! This is a reminder from your coaching center. Fees for ${formatMonthLabel(month)}: ${fmtINR(detail.totalAfterDiscount)}. Paid: ${fmtINR(detail.totalPaid)}. Due: ${fmtINR(detail.due)}.`;
-    return `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-  };
-
-  return (
-    <Modal title={`${student.name} · ${formatMonthLabel(month)}`} onClose={onClose}>
-      {loading || !detail ? <p className="muted">Loading...</p> : (
-        <>
-          <div className="fee-detail-grid">
-            <div className="stat-big blue">
-              <strong>{fmtINR(detail.totalAfterDiscount)}</strong>
-              <span>Monthly fee{detail.discountPercent > 0 && ` (after ${detail.discountPercent}% off)`}</span>
-            </div>
-            <div className="stat-big green">
-              <strong>{fmtINR(detail.totalPaid)}</strong>
-              <span>Paid so far</span>
-            </div>
-            <div className={'stat-big ' + (detail.due > 0 ? 'red' : 'green')}>
-              <strong>{fmtINR(detail.due)}</strong>
-              <span>{detail.due > 0 ? 'Pending' : 'Settled ✓'}</span>
-            </div>
-          </div>
-
-          <h3 style={{ marginTop: 16 }}>Per-subject breakdown</h3>
-          <p className="small muted">
-            {detail.daysInMonth} days in month · {detail.daysPresent} days present · pro-rated based on attendance
-          </p>
-          <div className="list">
-            {detail.breakdown.length === 0 && <p className="muted">No subjects selected for this student.</p>}
-            {detail.breakdown.map(b => (
-              <div key={b.name} className="history-row">
-                <div>
-                  <strong>{b.name}</strong>
-                  <p className="small muted">
-                    {fmtINR(b.pricePerMonth)}/month · {fmtINR(b.perDay)}/day
-                  </p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div><strong>{fmtINR(b.pricePerMonth)}</strong> <span className="small muted">monthly</span></div>
-                  <div className="small muted">Pro-rated: {fmtINR(b.proRated)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <h3 style={{ marginTop: 16 }}>Payment history</h3>
-          <div className="list">
-            {detail.payments.length === 0 && <p className="muted">No payments recorded yet.</p>}
-            {detail.payments.map(p => (
-              <div key={p._id} className="history-row">
-                <div>
-                  <strong>{fmtINR(p.amount)}</strong>
-                  <p className="small muted">
-                    {new Date(p.paidOn).toLocaleDateString('en-IN')} · {p.method}
-                    {p.notes && ` · ${p.notes}`}
-                  </p>
-                </div>
-                <button className="icon-btn icon-btn-danger" onClick={() => deletePayment(p._id)}>
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {!adding ? (
-            <div className="modal-buttons" style={{ marginTop: 16 }}>
-              <button className="btn btn-outline" onClick={onClose}>Close</button>
-              {(student.parentPhone || student.phone) && detail.due > 0 && (
-                <a className="btn btn-outline"
-                   href={shareReminderUrl(student.parentPhone || student.phone)}
-                   target="_blank" rel="noreferrer">
-                  <Send size={14} /> Send WhatsApp reminder
-                </a>
-              )}
-              <button className="btn btn-primary" onClick={() => setAdding(true)}>
-                <Plus size={14} /> Record Payment
-              </button>
-            </div>
-          ) : (
-            <div className="payment-form">
-              <h3>Record Payment</h3>
-              <label>Amount (₹) *</label>
-              <input type="number" value={payment.amount}
-                onChange={e => setPayment({...payment, amount: e.target.value})}
-                placeholder="Enter amount" autoFocus />
-              <label>Paid on</label>
-              <input type="date" value={payment.paidOn}
-                onChange={e => setPayment({...payment, paidOn: e.target.value})} />
-              <label>Method</label>
-              <select value={payment.method} onChange={e => setPayment({...payment, method: e.target.value})}>
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="bank">Bank Transfer</option>
-                <option value="other">Other</option>
-              </select>
-              <label>Notes (optional)</label>
-              <input value={payment.notes} onChange={e => setPayment({...payment, notes: e.target.value})}
-                placeholder="e.g. Partial, receipt #123" />
-              <div className="modal-buttons">
-                <button className="btn btn-outline" onClick={() => setAdding(false)}>Cancel</button>
-                <button className="btn btn-primary" onClick={recordPayment}>
-                  <Save size={14} /> Save Payment
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
-  );
-}
-
 function AnnouncementsTab() {
   const [list, setList] = useState([]);
   const [adding, setAdding] = useState(false);
@@ -1309,27 +973,15 @@ function AnnouncementsTab() {
   );
 }
 
-// ============================
-// SETTINGS TAB (now fetches full config with prices)
-// ============================
-function SettingsTab() {
-  const [form, setForm] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [newSubject, setNewSubject] = useState({ name: '', pricePerMonth: '' });
+function SettingsTab({ info }) {
+  const [form, setForm] = useState(info);
+  const [subjectInput, setSubjectInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
   const [pwds, setPwds] = useState({ teacherPassword: '', studentPassword: '', parentPassword: '' });
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const r = await api.get('/config');
-      setForm(r.data || {});
-    } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, []);
+  useEffect(() => { setForm(info); }, [info]);
 
   const save = async () => {
     setSaving(true);
@@ -1351,33 +1003,14 @@ function SettingsTab() {
   };
 
   const addSubject = () => {
-    if (!newSubject.name.trim()) return;
-    setForm(f => ({
-      ...f,
-      subjects: [
-        ...(f.subjects || []),
-        { name: newSubject.name.trim(), pricePerMonth: Number(newSubject.pricePerMonth) || 0 }
-      ]
-    }));
-    setNewSubject({ name: '', pricePerMonth: '' });
+    if (!subjectInput.trim()) return;
+    setForm(f => ({ ...f, subjects: [...(f.subjects || []), subjectInput.trim()] }));
+    setSubjectInput('');
   };
 
-  const updateSubject = (idx, field, value) => {
-    setForm(f => ({
-      ...f,
-      subjects: f.subjects.map((s, i) =>
-        i === idx
-          ? { ...s, [field]: field === 'pricePerMonth' ? Number(value) || 0 : value }
-          : s
-      )
-    }));
+  const removeSubject = (s) => {
+    setForm(f => ({ ...f, subjects: (f.subjects || []).filter(x => x !== s) }));
   };
-
-  const removeSubject = (idx) => {
-    setForm(f => ({ ...f, subjects: f.subjects.filter((_, i) => i !== idx) }));
-  };
-
-  if (loading || !form) return <p className="muted">Loading...</p>;
 
   return (
     <div className="container-narrow">
@@ -1397,58 +1030,16 @@ function SettingsTab() {
       <label>Class End Time</label>
       <input type="time" value={form.classEnd || ''} onChange={e => setForm({...form, classEnd: e.target.value})} />
 
-      <hr />
-
-      <h3>Subjects & Pricing</h3>
-      <p className="small muted">Set monthly fee per subject. Prices are visible to you only — students and parents never see them.</p>
-
-      <div className="subject-list">
-        {(form.subjects || []).map((s, idx) => (
-          <div key={idx} className="subject-row">
-            <input
-              value={s.name}
-              onChange={e => updateSubject(idx, 'name', e.target.value)}
-              placeholder="Subject name"
-              style={{ flex: 2 }}
-            />
-            <div className="price-input">
-              <span className="price-prefix">₹</span>
-              <input
-                type="number"
-                min="0"
-                value={s.pricePerMonth || 0}
-                onChange={e => updateSubject(idx, 'pricePerMonth', e.target.value)}
-                placeholder="0"
-              />
-              <span className="price-suffix">/mo</span>
-            </div>
-            <button className="icon-btn icon-btn-danger" onClick={() => removeSubject(idx)}>
-              <X size={14} />
-            </button>
-          </div>
+      <label>Subjects Taught</label>
+      <div className="chip-group">
+        {(form.subjects || []).map(s => (
+          <span key={s} className="chip">
+            {s} <button onClick={() => removeSubject(s)}><X size={12} /></button>
+          </span>
         ))}
       </div>
-
-      <div className="subject-row" style={{ marginTop: 12 }}>
-        <input
-          value={newSubject.name}
-          onChange={e => setNewSubject({ ...newSubject, name: e.target.value })}
-          placeholder="New subject (e.g. Physics)"
-          style={{ flex: 2 }}
-          onKeyDown={e => e.key === 'Enter' && addSubject()}
-        />
-        <div className="price-input">
-          <span className="price-prefix">₹</span>
-          <input
-            type="number"
-            min="0"
-            value={newSubject.pricePerMonth}
-            onChange={e => setNewSubject({ ...newSubject, pricePerMonth: e.target.value })}
-            placeholder="Price"
-            onKeyDown={e => e.key === 'Enter' && addSubject()}
-          />
-          <span className="price-suffix">/mo</span>
-        </div>
+      <div className="row">
+        <input value={subjectInput} onChange={e => setSubjectInput(e.target.value)} placeholder="Add a subject" onKeyDown={e => e.key === 'Enter' && addSubject()} />
         <button className="btn btn-outline" onClick={addSubject}>
           <Plus size={14} /> Add
         </button>
@@ -1586,9 +1177,18 @@ function StudentDashboard({ student, info, onSignOut }) {
         {tab === 'history' && summary && (
           <div>
             <div className="summary-stats">
-              <div className="stat-big green"><strong>{summary.present}</strong><span>Days Present</span></div>
-              <div className="stat-big red"><strong>{summary.absent}</strong><span>Days Absent</span></div>
-              <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
+              <div className="stat-big green">
+                <strong>{summary.present}</strong>
+                <span>Days Present</span>
+              </div>
+              <div className="stat-big red">
+                <strong>{summary.absent}</strong>
+                <span>Days Absent</span>
+              </div>
+              <div className="stat-big blue">
+                <strong>{summary.percentage}%</strong>
+                <span>Attendance</span>
+              </div>
             </div>
             <h3>Recent History</h3>
             <div className="list">
@@ -1724,9 +1324,18 @@ function ParentDashboard({ student, info, onSignOut }) {
             </div>
 
             <div className="summary-stats">
-              <div className="stat-big green"><strong>{summary.present}</strong><span>Days Present</span></div>
-              <div className="stat-big red"><strong>{summary.absent}</strong><span>Days Absent</span></div>
-              <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
+              <div className="stat-big green">
+                <strong>{summary.present}</strong>
+                <span>Days Present</span>
+              </div>
+              <div className="stat-big red">
+                <strong>{summary.absent}</strong>
+                <span>Days Absent</span>
+              </div>
+              <div className="stat-big blue">
+                <strong>{summary.percentage}%</strong>
+                <span>Attendance</span>
+              </div>
             </div>
 
             {summary.absentDays && summary.absentDays.length > 0 && (
@@ -1815,24 +1424,33 @@ function ClassInfo({ info }) {
       <h2 className="display">{info.classroomName || 'Coaching Center'}</h2>
       <div className="info-grid">
         {info.teacherName && (
-          <div className="info-row"><User size={18} /><span>Teacher: {info.teacherName}</span></div>
+          <div className="info-row">
+            <User size={18} /><span>Teacher: {info.teacherName}</span>
+          </div>
         )}
         {info.phone && (
-          <div className="info-row"><Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a></div>
+          <div className="info-row">
+            <Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a>
+          </div>
         )}
         {info.email && (
-          <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>
+          <div className="info-row">
+            <Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a>
+          </div>
         )}
         {info.mapUrl && (
-          <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location on Map</a></div>
+          <div className="info-row">
+            <MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location on Map</a>
+          </div>
         )}
         {info.classStart && info.classEnd && (
-          <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>
+          <div className="info-row">
+            <Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span>
+          </div>
         )}
         {info.subjects && info.subjects.length > 0 && (
           <div className="info-row">
-            <BookOpen size={18} />
-            <span>Subjects: {info.subjects.join(', ')}</span>
+            <BookOpen size={18} /><span>Subjects: {info.subjects.join(', ')}</span>
           </div>
         )}
       </div>

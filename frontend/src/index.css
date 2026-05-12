@@ -1,75 +1,481 @@
 /* ============================
-   ADDITIONS FOR FEES FEATURE
-   Append to the end of your existing index.css
+   RESET & BASE
    ============================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #root { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #faf7f2;
+  color: #1f1f1f;
+  line-height: 1.5;
+  font-size: 15px;
+}
+a { color: #c2410c; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid #e7e2da; margin: 16px 0; }
 
-/* Yellow badge for discount tag */
-.badge.yellow { background: #fef3c7; color: #92400e; }
-
-/* Subjects + pricing editor in Settings */
-.subject-list {
+/* ============================
+   LAYOUT
+   ============================ */
+.page {
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 12px 0;
 }
-.subject-row {
+.page-center {
+  min-height: 100vh;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  background: #faf7f2;
+  padding: 24px 16px;
 }
-.subject-row > input {
-  flex: 1;
+.container-narrow {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
 }
-.price-input {
+
+/* ============================
+   HEADERS
+   ============================ */
+.header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
+  padding: 16px 24px;
   background: #fff;
+  border-bottom: 1px solid #e7e2da;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #c2410c;
+}
+.logo h1 { font-size: 18px; color: #1f1f1f; }
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px;
+  background: #fff;
+  border-bottom: 1px solid #e7e2da;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* ============================
+   TYPOGRAPHY
+   ============================ */
+.display {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+h1.display { font-size: 28px; }
+h2.display { font-size: 24px; margin-bottom: 16px; }
+h3 { font-size: 18px; margin-bottom: 8px; }
+.muted { color: #666; }
+.small { font-size: 13px; }
+.text-center { text-align: center; }
+
+/* ============================
+   HERO
+   ============================ */
+.hero {
+  background: linear-gradient(135deg, #fef3e7 0%, #fde8d3 100%);
+  padding: 64px 24px;
+  text-align: center;
+}
+.hero h1.display { font-size: 40px; max-width: 800px; margin: 0 auto 16px; }
+.hero p { font-size: 17px; max-width: 600px; margin: 0 auto 32px; color: #444; }
+.hero-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ============================
+   FEATURES
+   ============================ */
+.features {
+  padding: 48px 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.features h2 { text-align: center; margin-bottom: 32px; }
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+}
+.card {
+  background: #fff;
+  padding: 24px;
+  border-radius: 12px;
+  border: 1px solid #e7e2da;
+  text-align: center;
+}
+.card h3 { margin: 12px 0 8px; }
+.card p { color: #666; font-size: 14px; }
+
+/* ============================
+   INFO SECTION
+   ============================ */
+.info-section {
+  padding: 48px 24px;
+  max-width: 700px;
+  margin: 0 auto;
+}
+.info-section h2 { text-align: center; margin-bottom: 24px; }
+.info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e7e2da;
+}
+
+/* ============================
+   FOOTER
+   ============================ */
+.footer {
+  margin-top: auto;
+  padding: 24px;
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+  background: #fff;
+  border-top: 1px solid #e7e2da;
+}
+
+/* ============================
+   AUTH GRID (login/register)
+   ============================ */
+.auth-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 24px;
+}
+@media (max-width: 768px) {
+  .auth-grid { grid-template-columns: 1fr; }
+}
+.auth-form {
+  background: #fff;
+  padding: 28px;
+  border-radius: 12px;
+  border: 1px solid #e7e2da;
+}
+.role-card {
+  padding: 16px;
+  border-radius: 10px;
+  margin-top: 12px;
+}
+.role-card h3 { font-size: 15px; margin-bottom: 4px; }
+.role-card p { font-size: 13px; color: #666; }
+.role-teacher { background: #fef3e7; }
+.role-student { background: #ecfdf5; }
+.role-parent { background: #fef9c3; }
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid #e7e2da;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #444;
+  margin-bottom: 16px;
+}
+.btn-back:hover { background: #f5f0e9; }
+
+/* ============================
+   FORMS
+   ============================ */
+label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #555;
+}
+input, textarea, select {
+  width: 100%;
+  padding: 10px 12px;
   border: 1px solid #ddd2c4;
   border-radius: 8px;
-  padding: 0 8px;
-  min-width: 140px;
+  font-size: 15px;
+  background: #fff;
+  font-family: inherit;
 }
-.price-input:focus-within {
+input:focus, textarea:focus {
+  outline: none;
   border-color: #c2410c;
   box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.1);
 }
-.price-input input {
-  border: none;
-  width: 100%;
-  padding: 10px 4px;
-  background: transparent;
+textarea { resize: vertical; min-height: 60px; }
+
+.password-field {
+  position: relative;
 }
-.price-input input:focus {
-  outline: none;
-  box-shadow: none;
-}
-.price-prefix, .price-suffix {
-  color: #888;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
+.password-field input { padding-right: 40px; }
+.password-field .icon-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-/* Fee preview chip inside StudentForm */
-.fee-preview {
+.checkbox-group, .radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+}
+.checkbox-label, .radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: #f5f0e9;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.checkbox-label input, .radio-label input {
+  width: auto;
+  margin: 0;
+}
+
+/* ============================
+   BUTTONS
+   ============================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-primary {
+  background: #c2410c;
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) { background: #9a3412; }
+.btn-secondary {
+  background: #fff;
+  color: #c2410c;
+  border-color: #c2410c;
+}
+.btn-secondary:hover { background: #fef3e7; }
+.btn-outline {
+  background: #fff;
+  color: #444;
+  border-color: #d4cdc0;
+}
+.btn-outline:hover { background: #f5f0e9; }
+.btn-block { width: 100%; margin-top: 12px; }
+.btn-lg { padding: 14px 24px; font-size: 16px; }
+.btn-link {
+  background: transparent;
+  border: none;
+  color: #c2410c;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: underline;
+}
+.btn-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-green { background: #16a34a; color: #fff; }
+.btn-green:hover { background: #15803d; }
+.btn-red { background: #dc2626; color: #fff; }
+.btn-red:hover { background: #b91c1c; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid #e7e2da;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #444;
+}
+.icon-btn:hover { background: #f5f0e9; }
+.icon-btn-danger { color: #dc2626; }
+.icon-btn-danger:hover { background: #fee2e2; }
+
+/* ============================
+   FEEDBACK
+   ============================ */
+.error-box {
+  padding: 12px 16px;
+  margin: 12px 0;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.success-box {
+  text-align: center;
+  padding: 40px 24px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e7e2da;
+}
+.success-box h2 { margin: 16px 0 8px; }
+.success-box p { margin-bottom: 12px; color: #444; }
+
+/* ============================
+   TABS (dashboard nav)
+   ============================ */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 24px 0;
+  background: #fff;
+  border-bottom: 1px solid #e7e2da;
+  overflow-x: auto;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: #666;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.tab:hover { color: #1f1f1f; }
+.tab.active {
+  color: #c2410c;
+  border-bottom-color: #c2410c;
+  font-weight: 600;
+}
+.tab-content {
+  flex: 1;
+  padding: 24px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ============================
+   TOOLBAR / SEARCH
+   ============================ */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.search-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
-  background: #fef3e7;
-  border: 1px solid #fde8d3;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #ddd2c4;
   border-radius: 8px;
-  margin: 12px 0;
-  color: #9a3412;
-  font-size: 14px;
+  flex: 1;
+  min-width: 200px;
 }
-.fee-preview strong {
-  color: #c2410c;
+.search-bar input {
+  border: none;
+  padding: 0;
+  background: transparent;
+  flex: 1;
+}
+.search-bar input:focus { box-shadow: none; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+}
+.row-buttons {
+  display: flex;
+  gap: 6px;
+}
+.row-center {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
 }
 
-/* Fee list cards (clickable rows in Fees tab) */
-.fee-card {
+/* ============================
+   LISTS
+   ============================ */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+}
+.list-item:hover { background: #f5f0e9; }
+.list-item.active {
+  border-color: #c2410c;
+  background: #fef3e7;
+}
+
+/* ============================
+   CARDS
+   ============================ */
+.student-card, .attendance-card, .announcement-card {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -78,103 +484,221 @@
   border: 1px solid #e7e2da;
   border-radius: 8px;
   gap: 12px;
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
+  flex-wrap: wrap;
 }
-.fee-card:hover {
-  background: #f5f0e9;
-  border-color: #d4cdc0;
-}
-.fee-card-left {
-  flex: 1;
-  min-width: 0;
-}
-.fee-card-left strong {
-  display: block;
-  margin-bottom: 4px;
-}
-.fee-card-right {
-  text-align: right;
+.attendance-status {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   align-items: flex-end;
 }
-.fee-amount {
-  font-size: 18px;
-  font-weight: 700;
-  color: #1f1f1f;
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-/* Fee detail modal — compact 3-column summary */
-.fee-detail-grid {
+/* ============================
+   BADGES
+   ============================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.badge.small { font-size: 11px; padding: 3px 8px; }
+.badge.green { background: #dcfce7; color: #166534; }
+.badge.red { background: #fee2e2; color: #991b1b; }
+.badge.blue { background: #dbeafe; color: #1e40af; }
+.badge.gray { background: #f3f4f6; color: #4b5563; }
+
+/* ============================
+   STATS
+   ============================ */
+.stat-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.stat.green { color: #16a34a; }
+.stat.red { color: #dc2626; }
+.stat.muted { color: #888; }
+
+.summary-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin: 16px 0;
 }
-.fee-detail-grid .stat-big {
-  padding: 14px 8px;
+.stat-big {
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 12px;
+  text-align: center;
 }
-.fee-detail-grid .stat-big strong {
-  font-size: 22px;
+.stat-big strong {
+  display: block;
+  font-size: 36px;
+  margin-bottom: 4px;
 }
-.fee-detail-grid .stat-big span {
-  font-size: 11px;
+.stat-big span { color: #666; font-size: 13px; }
+.stat-big.green strong { color: #16a34a; }
+.stat-big.red strong { color: #dc2626; }
+.stat-big.blue strong { color: #1e40af; }
+
+/* ============================
+   SUMMARY GRID
+   ============================ */
+.summary-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+}
+@media (max-width: 768px) {
+  .summary-grid { grid-template-columns: 1fr; }
 }
 
-/* Payment form section */
-.payment-form {
-  background: #faf7f2;
+/* ============================
+   BIG CARDS (student/parent today view)
+   ============================ */
+.center-content {
+  text-align: center;
+  padding: 24px 0;
+}
+.big-card {
+  padding: 40px 24px;
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #e7e2da;
+  text-align: center;
+  max-width: 480px;
+  margin: 16px auto;
+}
+.big-card h3 { margin: 12px 0; font-size: 22px; }
+.big-card p { margin: 4px 0; color: #555; }
+.big-card.green { background: #ecfdf5; border-color: #86efac; color: #166534; }
+.big-card.green h3 { color: #166534; }
+.big-card.red { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+.big-card.red h3 { color: #991b1b; }
+.big-card.muted-card { background: #f9fafb; border-color: #e5e7eb; color: #6b7280; }
+.today-status { margin-bottom: 16px; }
+
+/* ============================
+   EMPTY STATE
+   ============================ */
+.empty {
+  padding: 48px 24px;
+  text-align: center;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px dashed #e7e2da;
+}
+.empty h3 { margin: 12px 0 8px; }
+.empty p { color: #888; }
+
+/* ============================
+   CHIPS
+   ============================ */
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #fef3e7;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #9a3412;
+}
+.chip button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  padding: 0;
+}
+
+/* ============================
+   MODAL
+   ============================ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
   padding: 16px;
-  border-radius: 8px;
+}
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e7e2da;
+}
+.modal-header h3 { font-size: 18px; }
+.modal-body { padding: 20px; }
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
   margin-top: 16px;
 }
-.payment-form h3 {
-  margin-bottom: 8px;
-}
 
-/* Make select dropdowns match input styling */
-select {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #ddd2c4;
-  border-radius: 8px;
-  font-size: 15px;
-  background: #fff;
-  font-family: inherit;
-  cursor: pointer;
-}
-select:focus {
-  outline: none;
-  border-color: #c2410c;
-  box-shadow: 0 0 0 3px rgba(194, 65, 12, 0.1);
-}
-
-/* Mobile tweaks for fee feature */
+/* ============================
+   MOBILE
+   ============================ */
 @media (max-width: 640px) {
-  .subject-row {
-    flex-wrap: wrap;
-  }
-  .subject-row > input {
-    flex: 1 1 100%;
-  }
-  .price-input {
-    flex: 1;
-  }
-  .fee-card {
+  .hero { padding: 40px 16px; }
+  .hero h1.display { font-size: 28px; }
+  .dashboard-header { padding: 16px; }
+  .tab-content { padding: 16px; }
+  .summary-stats { grid-template-columns: 1fr; }
+  .stat-big strong { font-size: 28px; }
+  .student-card, .attendance-card, .announcement-card, .history-row {
     flex-direction: column;
     align-items: flex-start;
   }
-  .fee-card-right {
-    align-items: flex-start;
-    text-align: left;
-    width: 100%;
-  }
-  .fee-detail-grid {
-    grid-template-columns: 1fr;
-  }
+  .attendance-status { align-items: flex-start; }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   GraduationCap, LogIn, LogOut, User, Users, UserPlus,
   Calendar, CalendarOff, Clock, Phone, Mail, MapPin,
@@ -6,7 +6,8 @@ import {
   ChevronRight, ArrowLeft, CheckCircle, XCircle,
   AlertTriangle, Info, BarChart3, MessageSquare, Send,
   Megaphone, Eye, EyeOff, BookOpen, Settings,
-  Cake, Share2, MessageCircle, CalendarDays
+  Cake, Share2, MessageCircle, CalendarDays, Copy,
+  Wallet, RotateCcw, KeyRound, IndianRupee, Layers
 } from 'lucide-react';
 import axios from 'axios';
 import './index.css';
@@ -24,12 +25,22 @@ api.interceptors.request.use(config => {
 // ============================
 // HELPERS
 // ============================
-const todayISO = () => new Date().toISOString().split('T')[0];
+const TZ = 'Asia/Kolkata';
 
-const isOffDayToday = (announcements) => {
+const todayISO = () => {
+  // Local date in IST as YYYY-MM-DD
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+};
+
+const thisMonth = () => todayISO().substring(0, 7);
+
+const isOffDayToday = (announcements, batchId) => {
   const today = todayISO();
   return announcements.find(a =>
-    a.type === 'off-day' && a.dates && a.dates.includes(today)
+    a.type === 'off-day' && a.dates && a.dates.includes(today) &&
+    (!a.batchId || !batchId || a.batchId === batchId || a.batchId === '')
   );
 };
 
@@ -46,7 +57,7 @@ const cleanPhone = (phone) => (phone || '').replace(/\D/g, '');
 
 const whatsappLink = (phone, text) => {
   let num = cleanPhone(phone);
-  if (num && num.length === 10) num = '91' + num; // assume India
+  if (num && num.length === 10) num = '91' + num;
   const t = encodeURIComponent(text || '');
   return num ? `https://wa.me/${num}?text=${t}` : `https://wa.me/?text=${t}`;
 };
@@ -59,6 +70,14 @@ const formatDate = (iso) => {
     });
   } catch { return iso; }
 };
+
+const formatRupee = (n) => '₹' + (Math.round((n || 0) * 100) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+const getSubjectName = (s) => typeof s === 'string' ? s : s?.name;
+const getSubjectFee  = (s) => typeof s === 'string' ? 0 : (Number(s?.monthlyFee) || 0);
+
+// Find a batch object from its id within an info.batches array
+const findBatch = (info, batchId) => (info?.batches || []).find(b => String(b._id) === String(batchId));
 
 // ============================
 // MAIN APP
@@ -73,16 +92,31 @@ export default function App() {
   );
   const [announcements, setAnnouncements] = useState([]);
 
+  const refreshInfo = useCallback(async () => {
+    try {
+      // Authenticated /config returns the full doc including _id'd batches/subjects;
+      // fall back to public/info when not logged in or on error.
+      const tok = localStorage.getItem('token');
+      if (tok) {
+        const r = await api.get('/config');
+        if (r.data) { setInfo(r.data); return; }
+      }
+      const r2 = await api.get('/public/info');
+      setInfo(r2.data);
+    } catch {
+      try { const r2 = await api.get('/public/info'); setInfo(r2.data); } catch {}
+    }
+  }, []);
+
   useEffect(() => {
-    api.get('/public/info').then(r => setInfo(r.data)).catch(() => {});
+    refreshInfo();
     const savedRole = localStorage.getItem('role');
     const savedStudent = JSON.parse(localStorage.getItem('selectedStudent') || 'null');
     if (savedRole === 'teacher') setView('teacher');
     else if (savedRole === 'student' && savedStudent) setView('student');
     else if (savedRole === 'parent' && savedStudent) setView('parent');
-  }, []);
+  }, [refreshInfo]);
 
-  // Load announcements globally (for off-day banner)
   useEffect(() => {
     if (role) {
       api.get('/announcements').then(r => setAnnouncements(r.data)).catch(() => {});
@@ -94,21 +128,28 @@ export default function App() {
     setRole(null);
     setSelectedStudent(null);
     setView('landing');
+    refreshInfo();
   };
 
-  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} />;
+  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} onParentLogin={() => setView('parent-login')} />;
   if (view === 'register') return <Register info={info} onBack={() => setView('landing')} onDone={() => setView('login')} />;
   if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(r, s) => {
-    setRole(r);
-    if (r === 'teacher') { setView('teacher'); }
+    setRole(r); refreshInfo();
+    if (r === 'teacher') setView('teacher');
     else { setStudents(s); setView('pick-student'); }
+  }} />;
+  if (view === 'parent-login') return <ParentLogin info={info} onBack={() => setView('landing')} onLogin={(student) => {
+    setRole('parent'); setSelectedStudent(student);
+    localStorage.setItem('selectedStudent', JSON.stringify(student));
+    refreshInfo();
+    setView('parent');
   }} />;
   if (view === 'pick-student') return <PickStudent students={students} role={role} onPick={(s) => {
     setSelectedStudent(s);
     localStorage.setItem('selectedStudent', JSON.stringify(s));
-    setView(role === 'student' ? 'student' : 'parent');
+    setView('student');
   }} onBack={handleSignOut} />;
-  if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} />;
+  if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} refreshInfo={refreshInfo} />;
   if (view === 'student') return <StudentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
   if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
   return null;
@@ -117,8 +158,8 @@ export default function App() {
 // ============================
 // OFF-DAY BANNER (shared)
 // ============================
-function OffDayBanner({ announcements }) {
-  const off = isOffDayToday(announcements);
+function OffDayBanner({ announcements, batchId }) {
+  const off = isOffDayToday(announcements, batchId);
   if (!off) return null;
   return (
     <div className="off-day-banner">
@@ -134,7 +175,7 @@ function OffDayBanner({ announcements }) {
 // ============================
 // LANDING
 // ============================
-function Landing({ info, onSignIn, onRegister }) {
+function Landing({ info, onSignIn, onRegister, onParentLogin }) {
   return (
     <div className="page">
       <header className="header">
@@ -155,9 +196,12 @@ function Landing({ info, onSignIn, onRegister }) {
         <p>Students check in with one tap. Parents see real-time updates. Teachers manage everything from one dashboard.</p>
         <div className="hero-buttons">
           <button className="btn btn-primary btn-lg" onClick={onSignIn}>
-            <LogIn size={18} /> Sign In
+            <LogIn size={18} /> Sign In (Teacher / Student)
           </button>
-          <button className="btn btn-secondary btn-lg" onClick={onRegister}>
+          <button className="btn btn-secondary btn-lg" onClick={onParentLogin}>
+            <KeyRound size={18} /> Parent Login with Code
+          </button>
+          <button className="btn btn-outline btn-lg" onClick={onRegister}>
             <UserPlus size={18} /> Register as New Student
           </button>
         </div>
@@ -169,17 +213,17 @@ function Landing({ info, onSignIn, onRegister }) {
           <div className="card">
             <CheckCircle size={32} color="#16a34a" />
             <h3>Students Check In</h3>
-            <p>One tap to mark arrival. Check-in and check-out times recorded automatically.</p>
+            <p>One tap to mark arrival. Made a mistake? Undo within minutes. Check-in / check-out times use IST automatically.</p>
           </div>
           <div className="card">
             <BarChart3 size={32} color="#d97706" />
             <h3>Parents Track Progress</h3>
-            <p>See attendance history, percentage, and reasons for absence in real-time.</p>
+            <p>Each parent gets a unique code and sees only their own child's data — no list of other students.</p>
           </div>
           <div className="card">
             <Settings size={32} color="#dc2626" />
             <h3>Teacher Controls Everything</h3>
-            <p>Manage students, send announcements, share via WhatsApp with one click.</p>
+            <p>Batches, subjects with fees, holidays, announcements, WhatsApp sharing — all in one place.</p>
           </div>
         </div>
       </section>
@@ -187,21 +231,11 @@ function Landing({ info, onSignIn, onRegister }) {
       <section className="info-section">
         <h2 className="display">About Us</h2>
         <div className="info-grid">
-          {info.teacherName && (
-            <div className="info-row"><User size={18} /><span>{info.teacherName}</span></div>
-          )}
-          {info.phone && (
-            <div className="info-row"><Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a></div>
-          )}
-          {info.email && (
-            <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>
-          )}
-          {info.mapUrl && (
-            <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a></div>
-          )}
-          {info.classStart && info.classEnd && (
-            <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>
-          )}
+          {info.teacherName && <div className="info-row"><User size={18} /><span>{info.teacherName}</span></div>}
+          {info.phone && <div className="info-row"><Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a></div>}
+          {info.email && <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>}
+          {info.mapUrl && <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a></div>}
+          {info.classStart && info.classEnd && <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>}
         </div>
         <p className="tip muted text-center small">
           <Info size={14} /> Tip: Add this page to your home screen for one-tap access!
@@ -216,7 +250,7 @@ function Landing({ info, onSignIn, onRegister }) {
 }
 
 // ============================
-// LOGIN
+// LOGIN (teacher / student)
 // ============================
 function Login({ info, onBack, onLogin }) {
   const [password, setPassword] = useState('');
@@ -226,8 +260,7 @@ function Login({ info, onBack, onLogin }) {
 
   const submit = async (e) => {
     if (e) e.preventDefault();
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await api.post('/auth/login', { password });
       localStorage.setItem('token', res.data.token);
@@ -235,9 +268,7 @@ function Login({ info, onBack, onLogin }) {
       onLogin(res.data.role, res.data.students || []);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -247,7 +278,7 @@ function Login({ info, onBack, onLogin }) {
         <div className="auth-grid">
           <div>
             <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
-            <p className="muted">One password. Three roles.</p>
+            <p className="muted">Teacher and students sign in with a password.</p>
             <div className="role-card role-teacher">
               <h3>🎓 Teacher?</h3>
               <p>Use your teacher password to manage everything.</p>
@@ -258,12 +289,12 @@ function Login({ info, onBack, onLogin }) {
             </div>
             <div className="role-card role-parent">
               <h3>👨‍👩‍👧 Parent?</h3>
-              <p>Use the parent password to see your child's attendance.</p>
+              <p>Parents now log in with a <strong>unique code</strong> given by the teacher. <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Go back</a> and tap "Parent Login with Code".</p>
             </div>
           </div>
           <div className="auth-form">
             <h2 className="display">Sign In</h2>
-            <p className="muted">Enter your password below</p>
+            <p className="muted">Enter teacher or student password</p>
             <form onSubmit={submit}>
               <label>PASSWORD</label>
               <div className="password-field">
@@ -296,7 +327,60 @@ function Login({ info, onBack, onLogin }) {
 }
 
 // ============================
-// REGISTER
+// PARENT LOGIN (code only) — feature #13
+// ============================
+function ParentLogin({ info, onBack, onLogin }) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    if (e) e.preventDefault();
+    setLoading(true); setError('');
+    try {
+      const res = await api.post('/auth/parent-login', { code: code.toUpperCase().trim() });
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('role', 'parent');
+      onLogin(res.data.student);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Invalid code');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="page-center">
+      <div className="container-narrow">
+        <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
+        <div className="auth-form" style={{ maxWidth: 480, margin: '0 auto' }}>
+          <h1 className="display"><KeyRound size={22} /> Parent Login</h1>
+          <p className="muted">Enter the unique code your teacher gave you. You'll see your child's attendance and fees only — no other children.</p>
+          <form onSubmit={submit}>
+            <label>Parent Code</label>
+            <input
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase())}
+              placeholder="e.g. AB23CD"
+              maxLength={10}
+              autoFocus
+              style={{ fontSize: 20, letterSpacing: 4, textAlign: 'center', textTransform: 'uppercase' }}
+            />
+            {error && <div className="error-box">{error}</div>}
+            <button type="submit" className="btn btn-primary btn-block" disabled={loading || !code}>
+              {loading ? 'Checking...' : 'View My Child'}
+            </button>
+          </form>
+          <hr />
+          <p className="text-center small muted">
+            Don't have a code? Ask {info.teacherName || 'the teacher'} for it.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================
+// REGISTER (self-registration form)
 // ============================
 function Register({ info, onBack, onDone }) {
   const [form, setForm] = useState({
@@ -306,6 +390,7 @@ function Register({ info, onBack, onDone }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [createdStudent, setCreatedStudent] = useState(null);
 
   const toggleSubject = (s) => {
     setForm(f => ({
@@ -323,7 +408,8 @@ function Register({ info, onBack, onDone }) {
     if (!validateAadhar(form.aadhar)) { setError('Aadhar must be 12 digits'); return; }
     setLoading(true);
     try {
-      await api.post('/public/register', form);
+      const r = await api.post('/public/register', form);
+      setCreatedStudent(r.data.student);
       setSuccess(true);
     } catch (err) {
       setError(err.response?.data?.error || 'Registration failed');
@@ -339,6 +425,12 @@ function Register({ info, onBack, onDone }) {
             <h2 className="display">Welcome, {form.name}!</h2>
             <p>You're now registered at {info.classroomName || 'our coaching center'}.</p>
             <p className="muted">Ask your teacher for the student password to log in.</p>
+            {createdStudent?.parentCode && (
+              <div className="code-box" style={{ marginTop: 16 }}>
+                <span className="muted small">Parent code (give this to your parent):</span>
+                <strong>{createdStudent.parentCode}</strong>
+              </div>
+            )}
             <button className="btn btn-primary btn-lg" onClick={onDone}>Go to Sign In</button>
           </div>
         </div>
@@ -346,7 +438,8 @@ function Register({ info, onBack, onDone }) {
     );
   }
 
-  const availableSubjects = info.subjects?.length ? info.subjects : ['Mathematics', 'Science', 'English'];
+  const availableSubjects = (info.subjects || []).map(getSubjectName).filter(Boolean);
+  const fallback = availableSubjects.length ? availableSubjects : ['Mathematics', 'Science', 'English'];
 
   return (
     <div className="page-center">
@@ -376,7 +469,7 @@ function Register({ info, onBack, onDone }) {
 
             <label>Subjects you want to learn</label>
             <div className="checkbox-group">
-              {availableSubjects.map(s => (
+              {fallback.map(s => (
                 <label key={s} className="checkbox-label">
                   <input type="checkbox" checked={form.subjects.includes(s)} onChange={() => toggleSubject(s)} />
                   <span>{s}</span>
@@ -400,10 +493,12 @@ function Register({ info, onBack, onDone }) {
 }
 
 // ============================
-// PICK STUDENT
+// PICK STUDENT (now only used by 'student' role) — has "Back" if wrong tap (feature #1)
 // ============================
 function PickStudent({ students, role, onPick, onBack }) {
   const [search, setSearch] = useState('');
+  const [confirming, setConfirming] = useState(null);
+
   const filtered = students.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     (s.rollNumber || '').includes(search)
@@ -412,8 +507,8 @@ function PickStudent({ students, role, onPick, onBack }) {
     <div className="page-center">
       <div className="container-narrow">
         <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Sign out</button>
-        <h1 className="display">{role === 'parent' ? 'Find Your Child' : 'Who Are You?'}</h1>
-        <p className="muted">{role === 'parent' ? 'Select your child to see their attendance' : 'Tap your name to continue'}</p>
+        <h1 className="display">Who Are You?</h1>
+        <p className="muted">Tap your name to continue. Tapped wrong? You'll get a chance to go back.</p>
         <div className="search-bar">
           <Search size={16} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or roll number" autoFocus />
@@ -421,7 +516,7 @@ function PickStudent({ students, role, onPick, onBack }) {
         <div className="list">
           {filtered.length === 0 && <p className="muted text-center">No students found.</p>}
           {filtered.map(s => (
-            <button key={s._id} className="list-item" onClick={() => onPick(s)}>
+            <button key={s._id} className="list-item" onClick={() => setConfirming(s)}>
               <div>
                 <strong>{s.name}</strong>
                 <p className="muted small">Roll #{s.rollNumber}</p>
@@ -430,6 +525,23 @@ function PickStudent({ students, role, onPick, onBack }) {
             </button>
           ))}
         </div>
+
+        {confirming && (
+          <Modal onClose={() => setConfirming(null)} title="Is this you?">
+            <div className="text-center" style={{ padding: '12px 0' }}>
+              <h2 className="display" style={{ marginBottom: 4 }}>{confirming.name}</h2>
+              <p className="muted">Roll #{confirming.rollNumber}</p>
+            </div>
+            <div className="modal-buttons">
+              <button className="btn btn-outline" onClick={() => setConfirming(null)}>
+                <ArrowLeft size={14} /> No, go back
+              </button>
+              <button className="btn btn-primary" onClick={() => { const s = confirming; setConfirming(null); onPick(s); }}>
+                Yes, that's me <ChevronRight size={14} />
+              </button>
+            </div>
+          </Modal>
+        )}
       </div>
     </div>
   );
@@ -438,7 +550,7 @@ function PickStudent({ students, role, onPick, onBack }) {
 // ============================
 // TEACHER DASHBOARD
 // ============================
-function TeacherDashboard({ info, announcements, onSignOut }) {
+function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
   const [tab, setTab] = useState('today');
   return (
     <div className="page">
@@ -456,21 +568,26 @@ function TeacherDashboard({ info, announcements, onSignOut }) {
         <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}><Calendar size={16} /> Today</button>
         <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}><Users size={16} /> Students</button>
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
+        <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
         <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Announcements</button>
         <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}><Settings size={16} /> Settings</button>
       </nav>
 
       <main className="tab-content">
         {tab === 'today' && <TodayTab info={info} announcements={announcements} />}
-        {tab === 'students' && <StudentsTab info={info} />}
+        {tab === 'students' && <StudentsTab info={info} refreshInfo={refreshInfo} />}
         {tab === 'summary' && <SummaryTab info={info} />}
+        {tab === 'fees' && <FeesTab info={info} />}
         {tab === 'announcements' && <AnnouncementsTab info={info} />}
-        {tab === 'settings' && <SettingsTab info={info} />}
+        {tab === 'settings' && <SettingsTab info={info} refreshInfo={refreshInfo} />}
       </main>
     </div>
   );
 }
 
+// ============================
+// TODAY TAB — with "Unmark" undo (feature #9)
+// ============================
 function TodayTab({ info, announcements }) {
   const [students, setStudents] = useState([]);
   const [todayAtt, setTodayAtt] = useState([]);
@@ -478,14 +595,12 @@ function TodayTab({ info, announcements }) {
   const [markingStudent, setMarkingStudent] = useState(null);
   const [reason, setReason] = useState('');
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [batchFilter, setBatchFilter] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
-      const [s, a] = await Promise.all([
-        api.get('/students'),
-        api.get('/attendance/today'),
-      ]);
+      const [s, a] = await Promise.all([api.get('/students'), api.get('/attendance/today')]);
       setStudents(s.data);
       setTodayAtt(a.data);
     } catch (err) { console.error(err); }
@@ -494,7 +609,7 @@ function TodayTab({ info, announcements }) {
 
   useEffect(() => { load(); }, []);
 
-  const getAtt = (id) => todayAtt.find(a => a.studentId === id);
+  const getAtt = (id) => todayAtt.find(a => String(a.studentId) === String(id));
 
   const markPresent = async (id) => {
     try {
@@ -510,17 +625,24 @@ function TodayTab({ info, announcements }) {
         status: 'absent',
         reason: reason || 'No reason given'
       });
-      setMarkingStudent(null);
-      setReason('');
+      setMarkingStudent(null); setReason(''); load();
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  // Feature #9: undo a "marked present by mistake" record
+  const unmark = async (studentId) => {
+    if (!confirm('Roll back today\'s attendance for this student? It will go back to "not marked".')) return;
+    try {
+      await api.delete('/attendance/unmark', { data: { studentId } });
       load();
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
   const markAllPresent = async () => {
-    if (!confirm('Mark all students as present today?')) return;
+    if (!confirm(batchFilter ? 'Mark everyone in this batch as present today?' : 'Mark all students as present today?')) return;
     setBulkLoading(true);
     try {
-      const res = await api.post('/attendance/mark-all-present');
+      const res = await api.post('/attendance/mark-all-present', batchFilter ? { batchId: batchFilter } : {});
       load();
       alert(`Marked ${res.data.marked} student(s) as present.`);
     } catch (err) { alert('Failed: ' + err.message); }
@@ -529,7 +651,8 @@ function TodayTab({ info, announcements }) {
 
   if (loading) return <p className="muted">Loading...</p>;
 
-  const birthdayStudents = students.filter(s => isBirthdayToday(s.birthday));
+  const visible = batchFilter ? students.filter(s => s.batchId === batchFilter) : students;
+  const birthdayStudents = visible.filter(s => isBirthdayToday(s.birthday));
   const offDay = isOffDayToday(announcements);
 
   if (students.length === 0) return (
@@ -541,6 +664,7 @@ function TodayTab({ info, announcements }) {
   );
 
   const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const visibleAtt = todayAtt.filter(a => visible.some(s => String(s._id) === String(a.studentId)));
 
   return (
     <div>
@@ -556,28 +680,39 @@ function TodayTab({ info, announcements }) {
 
       <div className="stat-row">
         <div className="stat"><strong>{today}</strong></div>
-        <div className="stat green"><CheckCircle size={20} /> {todayAtt.filter(a => a.status === 'present').length} Present</div>
-        <div className="stat red"><XCircle size={20} /> {todayAtt.filter(a => a.status === 'absent').length} Absent</div>
-        <div className="stat muted"><Info size={20} /> {students.length - todayAtt.length} Not marked</div>
+        <div className="stat green"><CheckCircle size={20} /> {visibleAtt.filter(a => a.status === 'present').length} Present</div>
+        <div className="stat red"><XCircle size={20} /> {visibleAtt.filter(a => a.status === 'absent').length} Absent</div>
+        <div className="stat muted"><Info size={20} /> {visible.length - visibleAtt.length} Not marked</div>
       </div>
 
-      {!offDay && (
-        <div className="toolbar">
+      <div className="toolbar">
+        {(info.batches?.length || 0) > 0 && (
+          <select className="sort-select" value={batchFilter} onChange={e => setBatchFilter(e.target.value)}>
+            <option value="">All batches</option>
+            {info.batches.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+          </select>
+        )}
+        {!offDay && (
           <button className="btn btn-green" onClick={markAllPresent} disabled={bulkLoading}>
-            <CheckCircle size={16} /> {bulkLoading ? 'Marking...' : 'Mark Everyone Present'}
+            <CheckCircle size={16} /> {bulkLoading ? 'Marking...' : (batchFilter ? 'Mark Batch Present' : 'Mark Everyone Present')}
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="list">
-        {students.map(s => {
+        {visible.map(s => {
           const att = getAtt(s._id);
+          const batch = findBatch(info, s.batchId);
           return (
             <div key={s._id} className="attendance-card">
               <div>
                 <strong>{s.name}</strong>
                 {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂 Birthday!</span>}
-                <p className="muted small">Roll #{s.rollNumber}{s.subjects?.length ? ' · ' + s.subjects.join(', ') : ''}</p>
+                <p className="muted small">
+                  Roll #{s.rollNumber}
+                  {batch ? ` · ${batch.name} (${batch.startTime}-${batch.endTime})` : ''}
+                  {s.subjects?.length ? ' · ' + s.subjects.join(', ') : ''}
+                </p>
               </div>
               <div className="attendance-status">
                 {att ? (
@@ -597,6 +732,10 @@ function TodayTab({ info, announcements }) {
                     {att.markedBy === 'self' && (
                       <span className="badge blue small" title="Self marked"><Info size={12} /> Self-marked</span>
                     )}
+                    {/* Feature #9: undo / roll back today's mark */}
+                    <button className="btn-mini btn-outline" onClick={() => unmark(s._id)} title="Roll back today's attendance">
+                      <RotateCcw size={14} /> Undo
+                    </button>
                   </>
                 ) : (
                   <>
@@ -624,13 +763,18 @@ function TodayTab({ info, announcements }) {
   );
 }
 
-function StudentsTab({ info }) {
+// ============================
+// STUDENTS TAB — with batch column and parent-code display (features #4, #13)
+// ============================
+function StudentsTab({ info, refreshInfo }) {
   const [students, setStudents] = useState([]);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('name');
+  const [batchFilter, setBatchFilter] = useState('');
+  const [showCodeFor, setShowCodeFor] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -648,11 +792,18 @@ function StudentsTab({ info }) {
     load();
   };
 
+  const regenerateCode = async (id) => {
+    if (!confirm('Generate a new parent code? The old code will stop working immediately.')) return;
+    await api.post('/students/' + id + '/regenerate-code');
+    load();
+  };
+
   let filtered = students.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     (s.rollNumber || '').includes(search) ||
     (s.phone || '').includes(search)
   );
+  if (batchFilter) filtered = filtered.filter(s => s.batchId === batchFilter);
   filtered = [...filtered].sort((a, b) => {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     if (sortBy === 'roll') return (a.rollNumber || '').localeCompare(b.rollNumber || '');
@@ -668,6 +819,12 @@ function StudentsTab({ info }) {
           <Search size={16} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, roll, or phone" />
         </div>
+        {(info.batches?.length || 0) > 0 && (
+          <select className="sort-select" value={batchFilter} onChange={e => setBatchFilter(e.target.value)}>
+            <option value="">All batches</option>
+            {info.batches.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+          </select>
+        )}
         <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="sort-select">
           <option value="name">Sort by Name</option>
           <option value="roll">Sort by Roll #</option>
@@ -686,47 +843,90 @@ function StudentsTab({ info }) {
       )}
 
       <div className="list">
-        {filtered.map(s => (
-          <div key={s._id} className="student-card">
-            <div>
-              <strong>{s.name}</strong>
-              {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂</span>}
-              <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
-              {s.subjects?.length > 0 && <p className="small">Subjects: {s.subjects.join(', ')}</p>}
-              {s.parentPhone && (
-                <p className="small">
-                  Parent: {s.parentName || ''} ·{' '}
-                  <a href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
-                    <MessageCircle size={12} /> WhatsApp
-                  </a>
-                </p>
-              )}
-              {s.registeredVia === 'self' && <span className="badge blue small">Self-registered</span>}
+        {filtered.map(s => {
+          const batch = findBatch(info, s.batchId);
+          return (
+            <div key={s._id} className="student-card">
+              <div>
+                <strong>{s.name}</strong>
+                {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂</span>}
+                <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
+                {batch && <p className="small"><Layers size={12} /> Batch: <strong>{batch.name}</strong> ({batch.startTime}-{batch.endTime})</p>}
+                {s.subjects?.length > 0 && <p className="small">Subjects: {s.subjects.join(', ')}</p>}
+                {s.parentCode && (
+                  <p className="small">
+                    Parent code: <code className="inline-code">{s.parentCode}</code>{' '}
+                    <button className="btn-link" onClick={() => setShowCodeFor(s)}>Show / share</button>
+                  </p>
+                )}
+                {s.parentPhone && (
+                  <p className="small">
+                    Parent: {s.parentName || ''} ·{' '}
+                    <a href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
+                      <MessageCircle size={12} /> WhatsApp
+                    </a>
+                  </p>
+                )}
+                {s.registeredVia === 'self' && <span className="badge blue small">Self-registered</span>}
+              </div>
+              <div className="row-buttons">
+                <button className="icon-btn" onClick={() => setEditing(s)} title="Edit"><Edit2 size={16} /></button>
+                <button className="icon-btn icon-btn-danger" onClick={() => del(s._id)} title="Delete"><Trash2 size={16} /></button>
+              </div>
             </div>
-            <div className="row-buttons">
-              <button className="icon-btn" onClick={() => setEditing(s)} title="Edit"><Edit2 size={16} /></button>
-              <button className="icon-btn icon-btn-danger" onClick={() => del(s._id)} title="Delete"><Trash2 size={16} /></button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {(adding || editing) && (
         <StudentForm
           info={info}
           student={editing}
+          refreshInfo={refreshInfo}
           onClose={() => { setAdding(false); setEditing(null); }}
           onSaved={() => { setAdding(false); setEditing(null); load(); }}
         />
+      )}
+
+      {showCodeFor && (
+        <Modal onClose={() => setShowCodeFor(null)} title={`Parent code for ${showCodeFor.name}`}>
+          <div className="code-display">
+            <div className="muted small">Give this code to the parent. Tapping the WhatsApp button below sends it for you.</div>
+            <div className="code-big">{showCodeFor.parentCode}</div>
+            <div className="row-buttons" style={{ justifyContent: 'center', marginTop: 12 }}>
+              <button className="btn btn-outline btn-mini" onClick={() => navigator.clipboard?.writeText(showCodeFor.parentCode)}>
+                <Copy size={14} /> Copy code
+              </button>
+              {showCodeFor.parentPhone && (
+                <a
+                  className="btn btn-whatsapp btn-mini"
+                  href={whatsappLink(
+                    showCodeFor.parentPhone,
+                    `Hello! This is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'}.\n\nUse this code to view ${showCodeFor.name}'s attendance and fees:\n\n*${showCodeFor.parentCode}*\n\nOpen the website, tap "Parent Login with Code", and enter this code.`
+                  )}
+                  target="_blank" rel="noreferrer"
+                >
+                  <MessageCircle size={14} /> Send via WhatsApp
+                </a>
+              )}
+              <button className="btn btn-outline btn-mini" onClick={() => { regenerateCode(showCodeFor._id); setShowCodeFor(null); }}>
+                <RotateCcw size={14} /> Regenerate
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
 }
 
-function StudentForm({ info, student, onClose, onSaved }) {
+function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
+  // Make sure we always see the latest subjects/batches when this form opens (feature #12).
+  useEffect(() => { if (refreshInfo) refreshInfo(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [form, setForm] = useState(student || {
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', birthday: '', subjects: [], notes: ''
+    aadhar: '', birthday: '', subjects: [], notes: '', batchId: ''
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -757,7 +957,8 @@ function StudentForm({ info, student, onClose, onSaved }) {
     } finally { setSaving(false); }
   };
 
-  const availableSubjects = info.subjects?.length ? info.subjects : ['Mathematics', 'Science', 'English'];
+  // Feature #5 + #12: always pull subjects from the latest info; fall back gracefully.
+  const subjectOptions = ((info.subjects && info.subjects.length) ? info.subjects.map(getSubjectName) : ['Mathematics', 'Science', 'English']).filter(Boolean);
 
   return (
     <Modal onClose={onClose} title={student ? 'Edit Student' : 'Add New Student'}>
@@ -773,15 +974,31 @@ function StudentForm({ info, student, onClose, onSaved }) {
       <input value={form.parentPhone || ''} onChange={e => setForm({...form, parentPhone: e.target.value})} />
       <label>Aadhar (12 digits)</label>
       <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value})} maxLength={12} />
+
+      {/* Feature #4: assign student to a batch */}
+      <label>Batch</label>
+      {(info.batches?.length || 0) === 0 ? (
+        <p className="small muted">No batches yet — add some in Settings → Batches.</p>
+      ) : (
+        <select value={form.batchId || ''} onChange={e => setForm({ ...form, batchId: e.target.value })}>
+          <option value="">— No batch —</option>
+          {info.batches.map(b => (
+            <option key={b._id} value={b._id}>{b.name} ({b.startTime}-{b.endTime})</option>
+          ))}
+        </select>
+      )}
+
       <label>Subjects</label>
       <div className="checkbox-group">
-        {availableSubjects.map(s => (
+        {subjectOptions.length === 0 && <p className="small muted">No subjects yet — add some in Settings.</p>}
+        {subjectOptions.map(s => (
           <label key={s} className="checkbox-label">
             <input type="checkbox" checked={(form.subjects || []).includes(s)} onChange={() => toggleSubject(s)} />
             <span>{s}</span>
           </label>
         ))}
       </div>
+
       <label>Notes</label>
       <textarea value={form.notes || ''} onChange={e => setForm({...form, notes: e.target.value})} rows={3} />
       {error && <div className="error-box">{error}</div>}
@@ -795,6 +1012,9 @@ function StudentForm({ info, student, onClose, onSaved }) {
   );
 }
 
+// ============================
+// SUMMARY TAB — with batch chart (feature #10)
+// ============================
 function SummaryTab({ info }) {
   const [students, setStudents] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -802,12 +1022,22 @@ function SummaryTab({ info }) {
   const [history, setHistory] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [monthFilter, setMonthFilter] = useState(''); // YYYY-MM
+  const [monthFilter, setMonthFilter] = useState('');
+  const [allSummaries, setAllSummaries] = useState({}); // {studentId: {present, absent, percentage}}
 
   useEffect(() => {
-    api.get('/students').then(r => {
+    api.get('/students').then(async r => {
       setStudents(r.data);
       setLoading(false);
+      // pre-fetch summaries for chart
+      const map = {};
+      await Promise.all(r.data.map(async s => {
+        try {
+          const sr = await api.get('/attendance/summary/' + s._id);
+          map[s._id] = sr.data;
+        } catch {}
+      }));
+      setAllSummaries(map);
     });
   }, []);
 
@@ -834,6 +1064,26 @@ function SummaryTab({ info }) {
   const filteredHistory = monthFilter ? history.filter(h => h.date.startsWith(monthFilter)) : history;
   const monthOptions = Array.from(new Set(history.map(h => h.date.substring(0, 7)))).sort().reverse();
 
+  // Feature #10: per-batch attendance chart
+  const batchGroups = {};
+  const noBatchGroup = { name: 'No batch', percentages: [], students: [] };
+  students.forEach(s => {
+    const summ = allSummaries[s._id];
+    const pct = summ?.percentage ?? 0;
+    if (s.batchId) {
+      const b = findBatch(info, s.batchId);
+      const key = s.batchId;
+      if (!batchGroups[key]) batchGroups[key] = { name: b?.name || 'Batch', percentages: [], students: [] };
+      batchGroups[key].percentages.push(pct);
+      batchGroups[key].students.push(s);
+    } else {
+      noBatchGroup.percentages.push(pct);
+      noBatchGroup.students.push(s);
+    }
+  });
+  const chartGroups = [...Object.values(batchGroups)];
+  if (noBatchGroup.percentages.length) chartGroups.push(noBatchGroup);
+
   const shareWithParent = () => {
     if (!selected || !summary) return;
     const msg = `Hi! Attendance update for ${selected.name} (Roll #${selected.rollNumber}) from ${info.classroomName || 'our coaching center'}:\n\n` +
@@ -846,94 +1096,262 @@ function SummaryTab({ info }) {
   };
 
   return (
-    <div className="summary-grid">
-      <div>
-        <div className="search-bar">
-          <Search size={16} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students" />
-        </div>
-        <div className="list">
-          {filtered.map(s => (
-            <button key={s._id} className={'list-item' + (selected?._id === s._id ? ' active' : '')} onClick={() => loadStudent(s)}>
-              <div>
-                <strong>{s.name}</strong>
-                <p className="muted small">Roll #{s.rollNumber}</p>
-              </div>
-              <ChevronRight size={16} />
-            </button>
-          ))}
-        </div>
-      </div>
-      <div>
-        {!selected ? (
-          <div className="empty">
-            <Search size={48} color="#999" />
-            <h3>Select a student</h3>
-            <p className="muted">Tap a student to see their attendance summary.</p>
-          </div>
+    <div>
+      {/* Chart at the top */}
+      <div className="chart-card">
+        <h3><BarChart3 size={18} /> Attendance by Batch (average)</h3>
+        {chartGroups.length === 0 ? (
+          <p className="muted small">Add students to batches to see this chart.</p>
         ) : (
-          <>
-            <div className="row" style={{justifyContent: 'space-between', flexWrap: 'wrap'}}>
-              <div>
-                <h2 className="display">{selected.name}</h2>
-                <p className="muted">Roll #{selected.rollNumber}{selected.subjects?.length ? ' · ' + selected.subjects.join(', ') : ''}</p>
-              </div>
-              {selected.parentPhone && (
-                <button className="btn btn-whatsapp" onClick={shareWithParent}>
-                  <Share2 size={14} /> Share with Parent
-                </button>
-              )}
-            </div>
-
-            {summary && (
-              <div className="summary-stats">
-                <div className="stat-big green"><strong>{summary.present}</strong><span>Present</span></div>
-                <div className="stat-big red"><strong>{summary.absent}</strong><span>Absent</span></div>
-                <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
-              </div>
-            )}
-
-            <div className="row" style={{justifyContent: 'space-between'}}>
-              <h3>Attendance History</h3>
-              {monthOptions.length > 0 && (
-                <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sort-select">
-                  <option value="">All months</option>
-                  {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              )}
-            </div>
-            <div className="list">
-              {filteredHistory.length === 0 && <p className="muted">No records for this period.</p>}
-              {filteredHistory.map(h => (
-                <div key={h._id} className="history-row">
-                  <div>
-                    <strong>{formatDate(h.date)}</strong>
-                    {h.status === 'present' ? (
-                      <span className="badge green small">
-                        <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
-                      </span>
-                    ) : (
-                      <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
-                    )}
-                  </div>
-                  {h.markedBy === 'teacher' && <span className="small muted">Marked by you</span>}
-                  {h.markedBy === 'self' && <span className="small muted">Self-marked</span>}
-                </div>
-              ))}
-            </div>
-          </>
+          <BatchChart groups={chartGroups.map(g => ({
+            name: g.name,
+            value: g.percentages.length ? Math.round(g.percentages.reduce((a, b) => a + b, 0) / g.percentages.length) : 0,
+            count: g.students.length
+          }))} />
         )}
+      </div>
+
+      <div className="summary-grid">
+        <div>
+          <div className="search-bar">
+            <Search size={16} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students" />
+          </div>
+          <div className="list">
+            {filtered.map(s => {
+              const sm = allSummaries[s._id];
+              return (
+                <button key={s._id} className={'list-item' + (selected?._id === s._id ? ' active' : '')} onClick={() => loadStudent(s)}>
+                  <div>
+                    <strong>{s.name}</strong>
+                    <p className="muted small">Roll #{s.rollNumber}{sm ? ` · ${sm.percentage}%` : ''}</p>
+                  </div>
+                  <ChevronRight size={16} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          {!selected ? (
+            <div className="empty">
+              <Search size={48} color="#999" />
+              <h3>Select a student</h3>
+              <p className="muted">Tap a student to see their attendance summary.</p>
+            </div>
+          ) : (
+            <>
+              <div className="row" style={{justifyContent: 'space-between', flexWrap: 'wrap'}}>
+                <div>
+                  <h2 className="display">{selected.name}</h2>
+                  <p className="muted">Roll #{selected.rollNumber}{selected.subjects?.length ? ' · ' + selected.subjects.join(', ') : ''}</p>
+                </div>
+                {selected.parentPhone && (
+                  <button className="btn btn-whatsapp" onClick={shareWithParent}>
+                    <Share2 size={14} /> Share with Parent
+                  </button>
+                )}
+              </div>
+
+              {summary && (
+                <div className="summary-stats">
+                  <div className="stat-big green"><strong>{summary.present}</strong><span>Present</span></div>
+                  <div className="stat-big red"><strong>{summary.absent}</strong><span>Absent</span></div>
+                  <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
+                </div>
+              )}
+
+              <div className="row" style={{justifyContent: 'space-between'}}>
+                <h3>Attendance History</h3>
+                {monthOptions.length > 0 && (
+                  <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sort-select">
+                    <option value="">All months</option>
+                    {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                )}
+              </div>
+              <div className="list">
+                {filteredHistory.length === 0 && <p className="muted">No records for this period.</p>}
+                {filteredHistory.map(h => (
+                  <div key={h._id} className="history-row">
+                    <div>
+                      <strong>{formatDate(h.date)}</strong>
+                      {h.status === 'present' ? (
+                        <span className="badge green small">
+                          <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
+                        </span>
+                      ) : (
+                        <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
+                      )}
+                    </div>
+                    {h.markedBy === 'teacher' && <span className="small muted">Marked by you</span>}
+                    {h.markedBy === 'self' && <span className="small muted">Self-marked</span>}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
+// Simple SVG bar chart used by SummaryTab and FeesTab
+function BatchChart({ groups }) {
+  if (!groups.length) return null;
+  const maxV = Math.max(100, ...groups.map(g => g.value));
+  const barH = 28;
+  const gap = 12;
+  const labelW = 140;
+  const chartW = 460;
+  const h = groups.length * (barH + gap) + gap;
+  return (
+    <svg viewBox={`0 0 ${labelW + chartW + 60} ${h}`} style={{ width: '100%', maxWidth: 720 }} role="img">
+      {groups.map((g, i) => {
+        const y = gap + i * (barH + gap);
+        const w = (g.value / maxV) * chartW;
+        return (
+          <g key={i}>
+            <text x={0} y={y + barH / 2 + 5} fontSize="13" fill="#444">{g.name}</text>
+            <rect x={labelW} y={y} width={chartW} height={barH} fill="#f5f0e9" rx={4} />
+            <rect x={labelW} y={y} width={Math.max(2, w)} height={barH} fill="#c2410c" rx={4} />
+            <text x={labelW + Math.max(4, w) + 6} y={y + barH / 2 + 5} fontSize="13" fill="#1f1f1f" fontWeight="600">
+              {g.value}% {g.count != null ? `(${g.count})` : ''}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ============================
+// FEES TAB — features #6, #7, #8, #11
+// ============================
+function FeesTab({ info }) {
+  const [month, setMonth] = useState(thisMonth());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [batchFilter, setBatchFilter] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/fees/summary', { params: { month } });
+      setData(r.data);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, [month]);
+
+  if (loading) return <p className="muted">Loading fees…</p>;
+  if (!data) return <p className="muted">No data.</p>;
+
+  const rows = batchFilter ? data.students.filter(s => s.batchId === batchFilter) : data.students;
+  const monthlyTotal = rows.reduce((a, r) => a + (r.fees?.monthlyTotal || 0), 0);
+  const dailyTotal   = rows.reduce((a, r) => a + (r.fees?.perDayTotal   || 0), 0);
+
+  // chart per batch (sum of monthly fees)
+  const groups = {};
+  rows.forEach(r => {
+    const key = r.batchId || '__none__';
+    const b = findBatch(info, r.batchId);
+    if (!groups[key]) groups[key] = { name: r.batchId ? (b?.name || 'Batch') : 'No batch', value: 0, count: 0 };
+    groups[key].value += r.fees?.monthlyTotal || 0;
+    groups[key].count += 1;
+  });
+
+  return (
+    <div>
+      <div className="toolbar">
+        <div className="row">
+          <label style={{ margin: 0 }}>Month:</label>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="sort-select" />
+        </div>
+        {(info.batches?.length || 0) > 0 && (
+          <select className="sort-select" value={batchFilter} onChange={e => setBatchFilter(e.target.value)}>
+            <option value="">All batches</option>
+            {info.batches.map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="summary-stats">
+        <div className="stat-big green"><strong>{formatRupee(monthlyTotal)}</strong><span>Total / month</span></div>
+        <div className="stat-big blue"><strong>{formatRupee(dailyTotal)}</strong><span>Total / working day</span></div>
+        <div className="stat-big"><strong>{rows.length}</strong><span>Students</span></div>
+      </div>
+
+      <div className="chart-card">
+        <h3><BarChart3 size={18} /> Monthly fees by batch</h3>
+        <BatchChart groups={Object.values(groups).map(g => ({ name: g.name, value: Math.round(g.value), count: g.count }))} />
+      </div>
+
+      <h3 style={{ marginTop: 16 }}>Per-student breakdown</h3>
+      <div className="list">
+        {rows.length === 0 && <p className="muted">No students for this filter.</p>}
+        {rows.map(r => {
+          const batch = findBatch(info, r.batchId);
+          return (
+            <div key={r._id} className="fee-card">
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div>
+                  <strong>{r.name}</strong>
+                  <p className="muted small">
+                    Roll #{r.rollNumber}{batch ? ` · ${batch.name}` : ''}
+                    {r.fees ? ` · ${r.fees.workingDays}/${r.fees.totalDays} working days` : ''}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div><strong>{formatRupee(r.fees?.monthlyTotal || 0)}</strong> / month</div>
+                  <div className="small muted">{formatRupee(r.fees?.perDayTotal || 0)} per day</div>
+                </div>
+              </div>
+              {(r.fees?.subjects || []).length > 0 && (
+                <table className="fees-table">
+                  <thead>
+                    <tr>
+                      <th>Subject</th>
+                      <th className="text-right">Monthly</th>
+                      <th className="text-right">Per day</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.fees.subjects.map(s => (
+                      <tr key={s.name}>
+                        <td>{s.name}</td>
+                        <td className="text-right">{formatRupee(s.monthlyFee)}</td>
+                        <td className="text-right">{formatRupee(s.perDay)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="small muted" style={{ marginTop: 12 }}>
+        <Info size={12} /> Working days = total days in the month minus the batch's weekly off days (default: Sunday). Announced holidays do <strong>not</strong> reduce the working-day count.
+      </p>
+    </div>
+  );
+}
+
+// ============================
+// ANNOUNCEMENTS TAB — calendar picker + per-batch (feature #3)
+// ============================
 function AnnouncementsTab({ info }) {
   const [list, setList] = useState([]);
   const [adding, setAdding] = useState(false);
   const [type, setType] = useState('general');
   const [message, setMessage] = useState('');
-  const [dates, setDates] = useState('');
+  const [datePick, setDatePick] = useState('');
+  const [dates, setDates] = useState([]);
+  const [batchId, setBatchId] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -945,13 +1363,28 @@ function AnnouncementsTab({ info }) {
 
   useEffect(() => { load(); }, []);
 
+  const addDate = () => {
+    if (!datePick) return;
+    if (dates.includes(datePick)) return;
+    setDates(d => [...d, datePick].sort());
+    setDatePick('');
+  };
+
+  const removeDate = (d) => setDates(arr => arr.filter(x => x !== d));
+
+  const reset = () => {
+    setType('general'); setMessage(''); setDatePick(''); setDates([]); setBatchId('');
+  };
+
   const send = async () => {
     if (!message) return;
     await api.post('/announcements', {
       message, type,
-      dates: type === 'off-day' ? dates.split(',').map(d => d.trim()).filter(Boolean) : []
+      dates: type === 'off-day' ? dates : [],
+      batchId: batchId || ''
     });
-    setMessage(''); setDates(''); setAdding(false);
+    reset();
+    setAdding(false);
     load();
   };
 
@@ -962,11 +1395,12 @@ function AnnouncementsTab({ info }) {
   };
 
   const shareViaWhatsApp = (a) => {
+    const batch = findBatch(info, a.batchId);
     let text = `📢 *${info.classroomName || 'Coaching Center'}*\n\n`;
     if (a.type === 'off-day') {
-      text += `🏖️ *Holiday Notice*\n${a.message}\n\nDates: ${a.dates.join(', ')}\n\n`;
+      text += `🏖️ *Holiday Notice*${batch ? ` (Batch: ${batch.name})` : ''}\n${a.message}\n\nDates: ${a.dates.join(', ')}\n\n`;
     } else {
-      text += `${a.message}\n\n`;
+      text += `${batch ? `*Batch: ${batch.name}*\n` : ''}${a.message}\n\n`;
     }
     text += `- ${info.teacherName || 'Teacher'}`;
     window.open(whatsappLink(null, text), '_blank');
@@ -990,30 +1424,35 @@ function AnnouncementsTab({ info }) {
       )}
 
       <div className="list">
-        {list.map(a => (
-          <div key={a._id} className="announcement-card">
-            <div style={{flex: 1}}>
-              {a.type === 'off-day' ? (
-                <span className="badge red"><CalendarOff size={12} /> Off Day</span>
-              ) : (
-                <span className="badge blue"><MessageSquare size={12} /> General</span>
-              )}
-              <p>{a.message}</p>
-              {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
-              <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
+        {list.map(a => {
+          const batch = findBatch(info, a.batchId);
+          return (
+            <div key={a._id} className="announcement-card">
+              <div style={{flex: 1}}>
+                {a.type === 'off-day' ? (
+                  <span className="badge red"><CalendarOff size={12} /> Off Day</span>
+                ) : (
+                  <span className="badge blue"><MessageSquare size={12} /> General</span>
+                )}
+                {batch && <span className="badge gray small" style={{ marginLeft: 6 }}><Layers size={12} /> {batch.name}</span>}
+                {!batch && a.batchId === '' && <span className="badge gray small" style={{ marginLeft: 6 }}>All batches</span>}
+                <p>{a.message}</p>
+                {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.map(formatDate).join(', ')}</p>}
+                <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
+              </div>
+              <div className="row-buttons">
+                <button className="btn btn-whatsapp btn-mini" onClick={() => shareViaWhatsApp(a)} title="Share via WhatsApp">
+                  <Share2 size={14} /> Share
+                </button>
+                <button className="icon-btn icon-btn-danger" onClick={() => del(a._id)}><Trash2 size={16} /></button>
+              </div>
             </div>
-            <div className="row-buttons">
-              <button className="btn btn-whatsapp btn-mini" onClick={() => shareViaWhatsApp(a)} title="Share via WhatsApp">
-                <Share2 size={14} /> Share
-              </button>
-              <button className="icon-btn icon-btn-danger" onClick={() => del(a._id)}><Trash2 size={16} /></button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {adding && (
-        <Modal onClose={() => setAdding(false)} title="Send Announcement">
+        <Modal onClose={() => { setAdding(false); reset(); }} title="Send Announcement">
           <label>Type</label>
           <div className="radio-group">
             <label className="radio-label">
@@ -1025,18 +1464,43 @@ function AnnouncementsTab({ info }) {
               <span>Off-day (Holiday)</span>
             </label>
           </div>
+
+          <label>For which batch?</label>
+          <select value={batchId} onChange={e => setBatchId(e.target.value)}>
+            <option value="">All batches (everyone)</option>
+            {(info.batches || []).map(b => <option key={b._id} value={b._id}>{b.name}</option>)}
+          </select>
+
           <label>Message</label>
           <textarea value={message} onChange={e => setMessage(e.target.value)} rows={3} placeholder="Your message to students and parents" />
+
           {type === 'off-day' && (
             <>
-              <label>Dates (comma-separated, format: YYYY-MM-DD)</label>
-              <input value={dates} onChange={e => setDates(e.target.value)} placeholder="2026-01-26, 2026-08-15" />
-              <p className="small muted">When today matches any of these dates, a "Holiday" banner will show everywhere.</p>
+              <label><CalendarDays size={14} /> Pick holiday dates</label>
+              <div className="row">
+                <input type="date" value={datePick} onChange={e => setDatePick(e.target.value)} />
+                <button type="button" className="btn btn-outline" onClick={addDate}><Plus size={14} /> Add</button>
+              </div>
+              {dates.length > 0 ? (
+                <div className="chip-group" style={{ marginTop: 8 }}>
+                  {dates.map(d => (
+                    <span key={d} className="chip">
+                      {formatDate(d)} <button onClick={() => removeDate(d)}><X size={12} /></button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="small muted">Pick a date above and tap Add. You can add as many as you like.</p>
+              )}
+              <p className="small muted">When today matches any of these dates, a "Holiday" banner will show for the selected batch.</p>
             </>
           )}
+
           <div className="modal-buttons">
-            <button className="btn btn-outline" onClick={() => setAdding(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={send}><Send size={14} /> Save & Send</button>
+            <button className="btn btn-outline" onClick={() => { setAdding(false); reset(); }}>Cancel</button>
+            <button className="btn btn-primary" onClick={send} disabled={!message || (type === 'off-day' && dates.length === 0)}>
+              <Send size={14} /> Save & Send
+            </button>
           </div>
         </Modal>
       )}
@@ -1044,26 +1508,48 @@ function AnnouncementsTab({ info }) {
   );
 }
 
-function SettingsTab({ info }) {
+// ============================
+// SETTINGS TAB — subjects with fees, batches, refreshInfo (features #4, #5, #6, #12)
+// ============================
+function SettingsTab({ info, refreshInfo }) {
   const [form, setForm] = useState(info);
-  const [subjectInput, setSubjectInput] = useState('');
+  const [subjectName, setSubjectName] = useState('');
+  const [subjectFee, setSubjectFee] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
   const [pwds, setPwds] = useState({ teacherPassword: '', studentPassword: '', parentPassword: '' });
 
-  useEffect(() => { setForm(info); }, [info]);
+  // Whenever the parent re-fetches info, reset the form to that. We also normalize
+  // subjects to the {name, monthlyFee} format so the UI stays consistent.
+  useEffect(() => {
+    setForm({
+      ...info,
+      subjects: (info.subjects || []).map(s => typeof s === 'string' ? { name: s, monthlyFee: 0 } : { name: s.name, monthlyFee: Number(s.monthlyFee) || 0 }),
+      batches: (info.batches || []).map(b => ({ ...b })),
+    });
+  }, [info]);
 
   const save = async () => {
     setSaving(true);
     try {
-      const body = { ...form };
+      const body = {
+        ...form,
+        subjects: (form.subjects || []).map(s => ({ name: (s.name || '').trim(), monthlyFee: Number(s.monthlyFee) || 0 })).filter(s => s.name),
+        batches:  (form.batches  || []).map(b => ({
+          _id: b._id, name: (b.name || '').trim(),
+          startTime: b.startTime || '09:00', endTime: b.endTime || '11:00',
+          weeklyOffDays: (b.weeklyOffDays && b.weeklyOffDays.length) ? b.weeklyOffDays : [0]
+        })).filter(b => b.name),
+      };
       if (showPwd) {
         if (pwds.teacherPassword) body.teacherPassword = pwds.teacherPassword;
         if (pwds.studentPassword) body.studentPassword = pwds.studentPassword;
-        if (pwds.parentPassword) body.parentPassword = pwds.parentPassword;
+        if (pwds.parentPassword)  body.parentPassword  = pwds.parentPassword;
       }
       await api.put('/config', body);
+      // Feature #5 + #12: refresh global info so the Add Student form sees new subjects immediately.
+      if (refreshInfo) await refreshInfo();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       setPwds({ teacherPassword: '', studentPassword: '', parentPassword: '' });
@@ -1073,15 +1559,62 @@ function SettingsTab({ info }) {
     } finally { setSaving(false); }
   };
 
+  // -- Subjects with fees (#6) ----------------------------------------------
   const addSubject = () => {
-    if (!subjectInput.trim()) return;
-    setForm(f => ({ ...f, subjects: [...(f.subjects || []), subjectInput.trim()] }));
-    setSubjectInput('');
+    const name = subjectName.trim();
+    if (!name) return;
+    const fee = Number(subjectFee) || 0;
+    setForm(f => {
+      const existing = (f.subjects || []).some(s => s.name.toLowerCase() === name.toLowerCase());
+      if (existing) return f;
+      return { ...f, subjects: [...(f.subjects || []), { name, monthlyFee: fee }] };
+    });
+    setSubjectName(''); setSubjectFee('');
   };
 
-  const removeSubject = (s) => {
-    setForm(f => ({ ...f, subjects: (f.subjects || []).filter(x => x !== s) }));
+  const updateSubjectFee = (name, fee) => {
+    setForm(f => ({
+      ...f,
+      subjects: (f.subjects || []).map(s => s.name === name ? { ...s, monthlyFee: Number(fee) || 0 } : s)
+    }));
   };
+
+  const removeSubject = (name) => {
+    setForm(f => ({ ...f, subjects: (f.subjects || []).filter(s => s.name !== name) }));
+  };
+
+  // -- Batches (#4) ----------------------------------------------------------
+  const addBatch = () => {
+    setForm(f => ({
+      ...f,
+      batches: [...(f.batches || []), { name: 'New Batch', startTime: '09:00', endTime: '11:00', weeklyOffDays: [0] }]
+    }));
+  };
+
+  const updateBatch = (idx, patch) => {
+    setForm(f => ({
+      ...f,
+      batches: (f.batches || []).map((b, i) => i === idx ? { ...b, ...patch } : b)
+    }));
+  };
+
+  const toggleBatchOffDay = (idx, dow) => {
+    setForm(f => ({
+      ...f,
+      batches: (f.batches || []).map((b, i) => {
+        if (i !== idx) return b;
+        const cur = b.weeklyOffDays || [0];
+        return { ...b, weeklyOffDays: cur.includes(dow) ? cur.filter(d => d !== dow) : [...cur, dow].sort() };
+      })
+    }));
+  };
+
+  const removeBatch = (idx) => {
+    if (!confirm('Remove this batch? Students assigned to it will become unassigned.')) return;
+    setForm(f => ({ ...f, batches: (f.batches || []).filter((_, i) => i !== idx) }));
+  };
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   return (
     <div className="container-narrow">
@@ -1096,21 +1629,77 @@ function SettingsTab({ info }) {
       <input value={form.email || ''} onChange={e => setForm({...form, email: e.target.value})} />
       <label>Map URL (Google Maps link)</label>
       <input value={form.mapUrl || ''} onChange={e => setForm({...form, mapUrl: e.target.value})} />
-      <label>Class Start Time</label>
+      <label>Default Class Start Time</label>
       <input type="time" value={form.classStart || ''} onChange={e => setForm({...form, classStart: e.target.value})} />
-      <label>Class End Time</label>
+      <label>Default Class End Time</label>
       <input type="time" value={form.classEnd || ''} onChange={e => setForm({...form, classEnd: e.target.value})} />
 
-      <label>Subjects Taught</label>
-      <div className="chip-group">
-        {(form.subjects || []).map(s => (
-          <span key={s} className="chip">
-            {s} <button onClick={() => removeSubject(s)}><X size={12} /></button>
-          </span>
+      <hr />
+      <h3><Layers size={16} /> Batches (each can have its own timing & off-days)</h3>
+      <p className="small muted">Add as many batches as you like. Default off-day is Sunday only.</p>
+      <div className="batch-list">
+        {(form.batches || []).map((b, i) => (
+          <div key={b._id || i} className="batch-card">
+            <div className="row">
+              <label style={{ margin: 0, minWidth: 60 }}>Name</label>
+              <input value={b.name || ''} onChange={e => updateBatch(i, { name: e.target.value })} placeholder="e.g. Morning 6th Grade" />
+            </div>
+            <div className="row">
+              <label style={{ margin: 0, minWidth: 60 }}>Start</label>
+              <input type="time" value={b.startTime || ''} onChange={e => updateBatch(i, { startTime: e.target.value })} />
+              <label style={{ margin: 0, minWidth: 40 }}>End</label>
+              <input type="time" value={b.endTime || ''} onChange={e => updateBatch(i, { endTime: e.target.value })} />
+            </div>
+            <div>
+              <label style={{ marginTop: 8 }}>Weekly off days</label>
+              <div className="chip-group">
+                {dayNames.map((d, dow) => (
+                  <button
+                    key={dow}
+                    type="button"
+                    className={'chip-toggle' + ((b.weeklyOffDays || []).includes(dow) ? ' on' : '')}
+                    onClick={() => toggleBatchOffDay(i, dow)}
+                  >{d}</button>
+                ))}
+              </div>
+            </div>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-outline btn-mini" onClick={() => removeBatch(i)}>
+                <Trash2 size={14} /> Remove batch
+              </button>
+            </div>
+          </div>
         ))}
       </div>
-      <div className="row">
-        <input value={subjectInput} onChange={e => setSubjectInput(e.target.value)} placeholder="Add a subject" onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addSubject())} />
+      <button className="btn btn-outline" onClick={addBatch}><Plus size={14} /> Add batch</button>
+
+      <hr />
+      <h3><BookOpen size={16} /> Subjects & Monthly Fees</h3>
+      <p className="small muted">Add subjects taught here. The fee is per student per month for that subject. Per-day fee is calculated automatically from working days.</p>
+      <table className="settings-table">
+        <thead>
+          <tr><th>Subject</th><th>Monthly Fee (₹)</th><th></th></tr>
+        </thead>
+        <tbody>
+          {(form.subjects || []).length === 0 && (
+            <tr><td colSpan={3} className="muted small">No subjects yet.</td></tr>
+          )}
+          {(form.subjects || []).map(s => (
+            <tr key={s.name}>
+              <td>{s.name}</td>
+              <td>
+                <input type="number" min="0" value={s.monthlyFee} onChange={e => updateSubjectFee(s.name, e.target.value)} style={{ maxWidth: 140 }} />
+              </td>
+              <td className="text-right">
+                <button className="icon-btn icon-btn-danger" onClick={() => removeSubject(s.name)}><Trash2 size={14} /></button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row" style={{ marginTop: 8 }}>
+        <input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="New subject name" />
+        <input type="number" min="0" value={subjectFee} onChange={e => setSubjectFee(e.target.value)} placeholder="Monthly fee (₹)" style={{ maxWidth: 180 }} />
         <button className="btn btn-outline" onClick={addSubject}><Plus size={14} /> Add</button>
       </div>
 
@@ -1126,8 +1715,7 @@ function SettingsTab({ info }) {
           <input type="text" value={pwds.teacherPassword} onChange={e => setPwds({...pwds, teacherPassword: e.target.value})} placeholder="Leave blank to keep current" />
           <label>New Student Password</label>
           <input type="text" value={pwds.studentPassword} onChange={e => setPwds({...pwds, studentPassword: e.target.value})} placeholder="Leave blank to keep current" />
-          <label>New Parent Password</label>
-          <input type="text" value={pwds.parentPassword} onChange={e => setPwds({...pwds, parentPassword: e.target.value})} placeholder="Leave blank to keep current" />
+          <p className="small muted">Note: parents log in with a per-student code now, not a password.</p>
         </>
       )}
 
@@ -1139,11 +1727,10 @@ function SettingsTab({ info }) {
 }
 
 // ============================
-// STUDENT DASHBOARD
+// STUDENT DASHBOARD — with Undo Check-In (feature #1, #2)
 // ============================
 function StudentDashboard({ student, info, announcements, onSignOut }) {
   const [tab, setTab] = useState('today');
-  const [todayAtt, setTodayAtt] = useState(null);
   const [history, setHistory] = useState([]);
   const [summary, setSummary] = useState(null);
 
@@ -1156,11 +1743,12 @@ function StudentDashboard({ student, info, announcements, onSignOut }) {
       ]);
       setHistory(hist.data);
       setSummary(summ.data);
-      setTodayAtt(hist.data.find(h => h.date === todayISO()));
     } catch (err) { console.error(err); }
   };
 
   useEffect(() => { load(); }, [student]);
+
+  const todayAtt = history.find(h => h.date === todayISO());
 
   const checkIn = async () => {
     try {
@@ -1176,7 +1764,24 @@ function StudentDashboard({ student, info, announcements, onSignOut }) {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
-  const offDay = isOffDayToday(announcements);
+  // Feature #1: undo today's check-in if the student tapped someone else's name by mistake
+  const undoToday = async () => {
+    if (!confirm("Undo today's check-in? You'll be back to 'not marked'.")) return;
+    try {
+      await api.post('/attendance/undo-self', { studentId: student._id });
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed: ' + err.message);
+    }
+  };
+
+  // Feature #1 (extra): "This isn't me" - sign out and go back to picker
+  const wrongPerson = () => {
+    if (!confirm('Sign out and pick the right name?')) return;
+    onSignOut();
+  };
+
+  const offDay = isOffDayToday(announcements, student?.batchId);
 
   return (
     <div className="page">
@@ -1185,10 +1790,13 @@ function StudentDashboard({ student, info, announcements, onSignOut }) {
           <h1 className="display">Hi, {student?.name}</h1>
           <p className="muted">Roll #{student?.rollNumber}</p>
         </div>
-        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
+        <div className="row-buttons">
+          <button className="btn btn-outline" onClick={wrongPerson} title="Not you?"><ArrowLeft size={14} /> Not you?</button>
+          <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
+        </div>
       </header>
 
-      <OffDayBanner announcements={announcements} />
+      <OffDayBanner announcements={announcements} batchId={student?.batchId} />
 
       <nav className="tabs">
         <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}><Calendar size={16} /> Today</button>
@@ -1201,7 +1809,7 @@ function StudentDashboard({ student, info, announcements, onSignOut }) {
         {tab === 'today' && (
           <div className="center-content">
             <h2 className="display">
-              {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric' })}
+              {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric', timeZone: TZ })}
             </h2>
             {offDay ? (
               <div className="big-card muted-card">
@@ -1221,6 +1829,11 @@ function StudentDashboard({ student, info, announcements, onSignOut }) {
                   {!todayAtt.outTime && (
                     <button className="btn btn-primary btn-lg" onClick={checkOut}>
                       <Clock size={18} /> Check Out
+                    </button>
+                  )}
+                  {todayAtt.markedBy === 'self' && (
+                    <button className="btn btn-outline btn-lg" onClick={undoToday}>
+                      <RotateCcw size={18} /> Undo (wrong tap?)
                     </button>
                   )}
                 </div>
@@ -1272,48 +1885,23 @@ function StudentDashboard({ student, info, announcements, onSignOut }) {
           </div>
         )}
 
-        {tab === 'announcements' && (
-          <div>
-            <h2 className="display">Updates from your teacher</h2>
-            {announcements.length === 0 && (
-              <div className="empty">
-                <Megaphone size={48} color="#999" />
-                <p className="muted">No announcements yet.</p>
-              </div>
-            )}
-            <div className="list">
-              {announcements.map(a => (
-                <div key={a._id} className="announcement-card">
-                  <div>
-                    {a.type === 'off-day' ? (
-                      <span className="badge red"><CalendarOff size={12} /> Holiday</span>
-                    ) : (
-                      <span className="badge blue"><MessageSquare size={12} /> Update</span>
-                    )}
-                    <p>{a.message}</p>
-                    {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
-                    <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === 'info' && <ClassInfo info={info} />}
+        {tab === 'announcements' && <AnnouncementList announcements={announcements} info={info} />}
+        {tab === 'info' && <ClassInfo info={info} student={student} />}
       </main>
     </div>
   );
 }
 
 // ============================
-// PARENT DASHBOARD
+// PARENT DASHBOARD — sees only their own child (feature #13), with fees
 // ============================
 function ParentDashboard({ student, info, announcements, onSignOut }) {
   const [tab, setTab] = useState('summary');
   const [history, setHistory] = useState([]);
   const [summary, setSummary] = useState(null);
   const [monthFilter, setMonthFilter] = useState('');
+  const [fees, setFees] = useState(null);
+  const [feesMonth, setFeesMonth] = useState(thisMonth());
 
   const load = async () => {
     if (!student) return;
@@ -1327,11 +1915,19 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
     } catch (err) { console.error(err); }
   };
 
+  const loadFees = async () => {
+    try {
+      const r = await api.get('/fees/student/' + student._id, { params: { month: feesMonth } });
+      setFees(r.data);
+    } catch (err) { console.error(err); }
+  };
+
   useEffect(() => { load(); }, [student]);
+  useEffect(() => { if (tab === 'fees') loadFees(); }, [tab, feesMonth]);
 
   const today = todayISO();
   const todayAtt = history.find(h => h.date === today);
-  const offDay = isOffDayToday(announcements);
+  const offDay = isOffDayToday(announcements, student?.batchId);
 
   const filteredHistory = monthFilter ? history.filter(h => h.date.startsWith(monthFilter)) : history;
   const monthOptions = Array.from(new Set(history.map(h => h.date.substring(0, 7)))).sort().reverse();
@@ -1346,11 +1942,12 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
         <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
       </header>
 
-      <OffDayBanner announcements={announcements} />
+      <OffDayBanner announcements={announcements} batchId={student?.batchId} />
 
       <nav className="tabs">
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
         <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}><Calendar size={16} /> History</button>
+        <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
         <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Updates</button>
         <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}><Info size={16} /> Class Info</button>
       </nav>
@@ -1439,36 +2036,81 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
           </div>
         )}
 
-        {tab === 'announcements' && (
+        {tab === 'fees' && (
           <div>
-            <h2 className="display">Updates from the teacher</h2>
-            {announcements.length === 0 && (
-              <div className="empty">
-                <Megaphone size={48} color="#999" />
-                <p className="muted">No announcements yet.</p>
-              </div>
-            )}
-            <div className="list">
-              {announcements.map(a => (
-                <div key={a._id} className="announcement-card">
-                  <div>
-                    {a.type === 'off-day' ? (
-                      <span className="badge red"><CalendarOff size={12} /> Holiday</span>
-                    ) : (
-                      <span className="badge blue"><MessageSquare size={12} /> Update</span>
-                    )}
-                    <p>{a.message}</p>
-                    {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
-                    <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
-                  </div>
-                </div>
-              ))}
+            <div className="row" style={{justifyContent: 'space-between'}}>
+              <h3><IndianRupee size={16} /> Fees</h3>
+              <input type="month" value={feesMonth} onChange={e => setFeesMonth(e.target.value)} className="sort-select" />
             </div>
+            {!fees ? <p className="muted">Loading…</p> : (
+              <>
+                <div className="summary-stats">
+                  <div className="stat-big green"><strong>{formatRupee(fees.fees?.monthlyTotal || 0)}</strong><span>This month</span></div>
+                  <div className="stat-big blue"><strong>{formatRupee(fees.fees?.perDayTotal || 0)}</strong><span>Per working day</span></div>
+                  <div className="stat-big"><strong>{fees.fees?.workingDays}/{fees.fees?.totalDays}</strong><span>Working days</span></div>
+                </div>
+                <table className="fees-table">
+                  <thead>
+                    <tr><th>Subject</th><th className="text-right">Monthly</th><th className="text-right">Per day</th></tr>
+                  </thead>
+                  <tbody>
+                    {(fees.fees?.subjects || []).map(s => (
+                      <tr key={s.name}>
+                        <td>{s.name}</td>
+                        <td className="text-right">{formatRupee(s.monthlyFee)}</td>
+                        <td className="text-right">{formatRupee(s.perDay)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="small muted" style={{ marginTop: 12 }}>
+                  Per-day fee = monthly fee ÷ working days. Holidays don't reduce the working-day count.
+                </p>
+              </>
+            )}
           </div>
         )}
 
-        {tab === 'info' && <ClassInfo info={info} />}
+        {tab === 'announcements' && <AnnouncementList announcements={announcements} info={info} />}
+        {tab === 'info' && <ClassInfo info={info} student={student} />}
       </main>
+    </div>
+  );
+}
+
+// ============================
+// SHARED: Announcement List (used by student & parent)
+// ============================
+function AnnouncementList({ announcements, info }) {
+  return (
+    <div>
+      <h2 className="display">Updates from the teacher</h2>
+      {announcements.length === 0 && (
+        <div className="empty">
+          <Megaphone size={48} color="#999" />
+          <p className="muted">No announcements yet.</p>
+        </div>
+      )}
+      <div className="list">
+        {announcements.map(a => {
+          const batch = findBatch(info, a.batchId);
+          return (
+            <div key={a._id} className="announcement-card">
+              <div>
+                {a.type === 'off-day' ? (
+                  <span className="badge red"><CalendarOff size={12} /> Holiday</span>
+                ) : (
+                  <span className="badge blue"><MessageSquare size={12} /> Update</span>
+                )}
+                {batch && <span className="badge gray small" style={{ marginLeft: 6 }}>{batch.name}</span>}
+                <p>{a.message}</p>
+                {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.map(formatDate).join(', ')}</p>}
+                <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1476,7 +2118,8 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
 // ============================
 // CLASS INFO
 // ============================
-function ClassInfo({ info }) {
+function ClassInfo({ info, student }) {
+  const batch = student ? findBatch(info, student.batchId) : null;
   return (
     <div className="container-narrow">
       <h2 className="display">{info.classroomName || 'Coaching Center'}</h2>
@@ -1494,8 +2137,12 @@ function ClassInfo({ info }) {
         )}
         {info.email && <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>}
         {info.mapUrl && <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location on Map</a></div>}
-        {info.classStart && info.classEnd && <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>}
-        {info.subjects?.length > 0 && <div className="info-row"><BookOpen size={18} /><span>Subjects: {info.subjects.join(', ')}</span></div>}
+        {batch ? (
+          <div className="info-row"><Layers size={18} /><span>Your batch: <strong>{batch.name}</strong> ({batch.startTime} - {batch.endTime})</span></div>
+        ) : info.classStart && info.classEnd && (
+          <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>
+        )}
+        {info.subjects?.length > 0 && <div className="info-row"><BookOpen size={18} /><span>Subjects: {info.subjects.map(getSubjectName).filter(Boolean).join(', ')}</span></div>}
       </div>
     </div>
   );

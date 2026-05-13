@@ -5,7 +5,8 @@ import {
   Plus, Trash2, Edit2, Save, X, Search,
   ChevronRight, ArrowLeft, CheckCircle, XCircle,
   AlertTriangle, Info, BarChart3, MessageSquare, Send,
-  Megaphone, Eye, EyeOff, BookOpen, Settings
+  Megaphone, Eye, EyeOff, BookOpen, Settings,
+  Cake, Share2, MessageCircle, CalendarDays
 } from 'lucide-react';
 import axios from 'axios';
 import './index.css';
@@ -21,6 +22,45 @@ api.interceptors.request.use(config => {
 });
 
 // ============================
+// HELPERS
+// ============================
+const todayISO = () => new Date().toISOString().split('T')[0];
+
+const isOffDayToday = (announcements) => {
+  const today = todayISO();
+  return announcements.find(a =>
+    a.type === 'off-day' && a.dates && a.dates.includes(today)
+  );
+};
+
+const isBirthdayToday = (birthday) => {
+  if (!birthday) return false;
+  const today = new Date();
+  const parts = birthday.split('-');
+  if (parts.length < 3) return false;
+  return parseInt(parts[1]) === today.getMonth() + 1 &&
+         parseInt(parts[2]) === today.getDate();
+};
+
+const cleanPhone = (phone) => (phone || '').replace(/\D/g, '');
+
+const whatsappLink = (phone, text) => {
+  let num = cleanPhone(phone);
+  if (num && num.length === 10) num = '91' + num; // assume India
+  const t = encodeURIComponent(text || '');
+  return num ? `https://wa.me/${num}?text=${t}` : `https://wa.me/?text=${t}`;
+};
+
+const formatDate = (iso) => {
+  if (!iso) return '';
+  try {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', {
+      day: 'numeric', month: 'short', year: 'numeric'
+    });
+  } catch { return iso; }
+};
+
+// ============================
 // MAIN APP
 // ============================
 export default function App() {
@@ -31,18 +71,23 @@ export default function App() {
   const [selectedStudent, setSelectedStudent] = useState(
     JSON.parse(localStorage.getItem('selectedStudent') || 'null')
   );
+  const [announcements, setAnnouncements] = useState([]);
 
   useEffect(() => {
-    // Load public coaching info
     api.get('/public/info').then(r => setInfo(r.data)).catch(() => {});
-
-    // Resume session
     const savedRole = localStorage.getItem('role');
     const savedStudent = JSON.parse(localStorage.getItem('selectedStudent') || 'null');
     if (savedRole === 'teacher') setView('teacher');
     else if (savedRole === 'student' && savedStudent) setView('student');
     else if (savedRole === 'parent' && savedStudent) setView('parent');
   }, []);
+
+  // Load announcements globally (for off-day banner)
+  useEffect(() => {
+    if (role) {
+      api.get('/announcements').then(r => setAnnouncements(r.data)).catch(() => {});
+    }
+  }, [role, view]);
 
   const handleSignOut = () => {
     localStorage.clear();
@@ -63,10 +108,27 @@ export default function App() {
     localStorage.setItem('selectedStudent', JSON.stringify(s));
     setView(role === 'student' ? 'student' : 'parent');
   }} onBack={handleSignOut} />;
-  if (view === 'teacher') return <TeacherDashboard info={info} onSignOut={handleSignOut} />;
-  if (view === 'student') return <StudentDashboard student={selectedStudent} info={info} onSignOut={handleSignOut} />;
-  if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} onSignOut={handleSignOut} />;
+  if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} />;
+  if (view === 'student') return <StudentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
+  if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
   return null;
+}
+
+// ============================
+// OFF-DAY BANNER (shared)
+// ============================
+function OffDayBanner({ announcements }) {
+  const off = isOffDayToday(announcements);
+  if (!off) return null;
+  return (
+    <div className="off-day-banner">
+      <CalendarOff size={20} />
+      <div>
+        <strong>Today is a holiday</strong>
+        <p>{off.message}</p>
+      </div>
+    </div>
+  );
 }
 
 // ============================
@@ -89,7 +151,7 @@ function Landing({ info, onSignIn, onRegister }) {
       </header>
 
       <section className="hero">
-        <h1 className="display">Smart Attendance Tracking for {info.classroomName || 'Your Coaching Center'}</h1>
+        <h1 className="display">Smart Attendance for {info.classroomName || 'Your Coaching Center'}</h1>
         <p>Students check in with one tap. Parents see real-time updates. Teachers manage everything from one dashboard.</p>
         <div className="hero-buttons">
           <button className="btn btn-primary btn-lg" onClick={onSignIn}>
@@ -112,12 +174,12 @@ function Landing({ info, onSignIn, onRegister }) {
           <div className="card">
             <BarChart3 size={32} color="#d97706" />
             <h3>Parents Track Progress</h3>
-            <p>See attendance history, percentage, and reasons for absence.</p>
+            <p>See attendance history, percentage, and reasons for absence in real-time.</p>
           </div>
           <div className="card">
             <Settings size={32} color="#dc2626" />
             <h3>Teacher Controls Everything</h3>
-            <p>Manage students, send announcements, and view reports.</p>
+            <p>Manage students, send announcements, share via WhatsApp with one click.</p>
           </div>
         </div>
       </section>
@@ -126,31 +188,24 @@ function Landing({ info, onSignIn, onRegister }) {
         <h2 className="display">About Us</h2>
         <div className="info-grid">
           {info.teacherName && (
-            <div className="info-row">
-              <User size={18} /><span>{info.teacherName}</span>
-            </div>
+            <div className="info-row"><User size={18} /><span>{info.teacherName}</span></div>
           )}
           {info.phone && (
-            <div className="info-row">
-              <Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a>
-            </div>
+            <div className="info-row"><Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a></div>
           )}
           {info.email && (
-            <div className="info-row">
-              <Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a>
-            </div>
+            <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>
           )}
           {info.mapUrl && (
-            <div className="info-row">
-              <MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a>
-            </div>
+            <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location</a></div>
           )}
           {info.classStart && info.classEnd && (
-            <div className="info-row">
-              <Clock size={18} /><span>Class hours: {info.classStart} - {info.classEnd}</span>
-            </div>
+            <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>
           )}
         </div>
+        <p className="tip muted text-center small">
+          <Info size={14} /> Tip: Add this page to your home screen for one-tap access!
+        </p>
       </section>
 
       <footer className="footer">
@@ -188,9 +243,7 @@ function Login({ info, onBack, onLogin }) {
   return (
     <div className="page-center">
       <div className="container-narrow">
-        <button className="btn-back" onClick={onBack}>
-          <ArrowLeft size={16} /> Back
-        </button>
+        <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
         <div className="auth-grid">
           <div>
             <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
@@ -243,12 +296,12 @@ function Login({ info, onBack, onLogin }) {
 }
 
 // ============================
-// REGISTER (public)
+// REGISTER
 // ============================
 function Register({ info, onBack, onDone }) {
   const [form, setForm] = useState({
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', subjects: [], notes: ''
+    aadhar: '', birthday: '', subjects: [], notes: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -266,23 +319,15 @@ function Register({ info, onBack, onDone }) {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!form.name || !form.phone) {
-      setError('Name and phone are required');
-      return;
-    }
-    if (!validateAadhar(form.aadhar)) {
-      setError('Aadhar must be 12 digits');
-      return;
-    }
+    if (!form.name || !form.phone) { setError('Name and phone are required'); return; }
+    if (!validateAadhar(form.aadhar)) { setError('Aadhar must be 12 digits'); return; }
     setLoading(true);
     try {
       await api.post('/public/register', form);
       setSuccess(true);
     } catch (err) {
       setError(err.response?.data?.error || 'Registration failed');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   if (success) {
@@ -291,8 +336,8 @@ function Register({ info, onBack, onDone }) {
         <div className="container-narrow">
           <div className="success-box">
             <CheckCircle size={48} color="#16a34a" />
-            <h2 className="display">Registration Successful!</h2>
-            <p>Welcome to {info.classroomName || 'our coaching center'}, {form.name}!</p>
+            <h2 className="display">Welcome, {form.name}!</h2>
+            <p>You're now registered at {info.classroomName || 'our coaching center'}.</p>
             <p className="muted">Ask your teacher for the student password to log in.</p>
             <button className="btn btn-primary btn-lg" onClick={onDone}>Go to Sign In</button>
           </div>
@@ -301,14 +346,12 @@ function Register({ info, onBack, onDone }) {
     );
   }
 
-  const availableSubjects = info.subjects && info.subjects.length ? info.subjects : ['Mathematics', 'Science', 'English'];
+  const availableSubjects = info.subjects?.length ? info.subjects : ['Mathematics', 'Science', 'English'];
 
   return (
     <div className="page-center">
       <div className="container-narrow">
-        <button className="btn-back" onClick={onBack}>
-          <ArrowLeft size={16} /> Back
-        </button>
+        <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
         <div className="auth-form">
           <h1 className="display">Register as New Student</h1>
           <p className="muted">Fill in your details to join {info.classroomName || 'our coaching center'}</p>
@@ -319,6 +362,9 @@ function Register({ info, onBack, onDone }) {
             <label>Phone Number *</label>
             <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder="10-digit phone number" required />
 
+            <label>Date of Birth</label>
+            <input type="date" value={form.birthday} onChange={e => setForm({...form, birthday: e.target.value})} />
+
             <label>Parent / Guardian Name</label>
             <input value={form.parentName} onChange={e => setForm({...form, parentName: e.target.value})} placeholder="Parent's name" />
 
@@ -326,17 +372,13 @@ function Register({ info, onBack, onDone }) {
             <input value={form.parentPhone} onChange={e => setForm({...form, parentPhone: e.target.value})} placeholder="Parent's phone number" />
 
             <label>Aadhar Number (optional)</label>
-            <input value={form.aadhar} onChange={e => setForm({...form, aadhar: e.target.value})} placeholder="12-digit Aadhar number" maxLength={12} />
+            <input value={form.aadhar} onChange={e => setForm({...form, aadhar: e.target.value})} placeholder="12-digit Aadhar" maxLength={12} />
 
-            <label>Subjects (select what you want to learn)</label>
+            <label>Subjects you want to learn</label>
             <div className="checkbox-group">
               {availableSubjects.map(s => (
                 <label key={s} className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={form.subjects.includes(s)}
-                    onChange={() => toggleSubject(s)}
-                  />
+                  <input type="checkbox" checked={form.subjects.includes(s)} onChange={() => toggleSubject(s)} />
                   <span>{s}</span>
                 </label>
               ))}
@@ -358,7 +400,7 @@ function Register({ info, onBack, onDone }) {
 }
 
 // ============================
-// PICK STUDENT (after student/parent login)
+// PICK STUDENT
 // ============================
 function PickStudent({ students, role, onPick, onBack }) {
   const [search, setSearch] = useState('');
@@ -369,19 +411,12 @@ function PickStudent({ students, role, onPick, onBack }) {
   return (
     <div className="page-center">
       <div className="container-narrow">
-        <button className="btn-back" onClick={onBack}>
-          <ArrowLeft size={16} /> Sign out
-        </button>
+        <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Sign out</button>
         <h1 className="display">{role === 'parent' ? 'Find Your Child' : 'Who Are You?'}</h1>
         <p className="muted">{role === 'parent' ? 'Select your child to see their attendance' : 'Tap your name to continue'}</p>
         <div className="search-bar">
           <Search size={16} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name or roll number"
-            autoFocus
-          />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or roll number" autoFocus />
         </div>
         <div className="list">
           {filtered.length === 0 && <p className="muted text-center">No students found.</p>}
@@ -403,7 +438,7 @@ function PickStudent({ students, role, onPick, onBack }) {
 // ============================
 // TEACHER DASHBOARD
 // ============================
-function TeacherDashboard({ info, onSignOut }) {
+function TeacherDashboard({ info, announcements, onSignOut }) {
   const [tab, setTab] = useState('today');
   return (
     <div className="page">
@@ -412,46 +447,37 @@ function TeacherDashboard({ info, onSignOut }) {
           <h1 className="display">Teacher Dashboard</h1>
           <p className="muted">Welcome back, {info.teacherName || 'Teacher'}</p>
         </div>
-        <button className="btn btn-outline" onClick={onSignOut}>
-          <LogOut size={16} /> Sign out
-        </button>
+        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
       </header>
 
+      <OffDayBanner announcements={announcements} />
+
       <nav className="tabs">
-        <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}>
-          <Calendar size={16} /> Today
-        </button>
-        <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}>
-          <Users size={16} /> Students
-        </button>
-        <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}>
-          <BarChart3 size={16} /> Summary
-        </button>
-        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
-          <Megaphone size={16} /> Announcements
-        </button>
-        <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}>
-          <Settings size={16} /> Settings
-        </button>
+        <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}><Calendar size={16} /> Today</button>
+        <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}><Users size={16} /> Students</button>
+        <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
+        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Announcements</button>
+        <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}><Settings size={16} /> Settings</button>
       </nav>
 
       <main className="tab-content">
-        {tab === 'today' && <TodayTab info={info} />}
+        {tab === 'today' && <TodayTab info={info} announcements={announcements} />}
         {tab === 'students' && <StudentsTab info={info} />}
-        {tab === 'summary' && <SummaryTab />}
-        {tab === 'announcements' && <AnnouncementsTab />}
+        {tab === 'summary' && <SummaryTab info={info} />}
+        {tab === 'announcements' && <AnnouncementsTab info={info} />}
         {tab === 'settings' && <SettingsTab info={info} />}
       </main>
     </div>
   );
 }
 
-function TodayTab({ info }) {
+function TodayTab({ info, announcements }) {
   const [students, setStudents] = useState([]);
   const [todayAtt, setTodayAtt] = useState([]);
   const [loading, setLoading] = useState(true);
   const [markingStudent, setMarkingStudent] = useState(null);
   const [reason, setReason] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -462,11 +488,8 @@ function TodayTab({ info }) {
       ]);
       setStudents(s.data);
       setTodayAtt(a.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
@@ -493,7 +516,22 @@ function TodayTab({ info }) {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
+  const markAllPresent = async () => {
+    if (!confirm('Mark all students as present today?')) return;
+    setBulkLoading(true);
+    try {
+      const res = await api.post('/attendance/mark-all-present');
+      load();
+      alert(`Marked ${res.data.marked} student(s) as present.`);
+    } catch (err) { alert('Failed: ' + err.message); }
+    finally { setBulkLoading(false); }
+  };
+
   if (loading) return <p className="muted">Loading...</p>;
+
+  const birthdayStudents = students.filter(s => isBirthdayToday(s.birthday));
+  const offDay = isOffDayToday(announcements);
+
   if (students.length === 0) return (
     <div className="empty">
       <Users size={48} color="#999" />
@@ -506,20 +544,30 @@ function TodayTab({ info }) {
 
   return (
     <div>
+      {birthdayStudents.length > 0 && (
+        <div className="birthday-banner">
+          <Cake size={20} />
+          <div>
+            <strong>🎉 Today's Birthday{birthdayStudents.length > 1 ? 's' : ''}!</strong>
+            <p>{birthdayStudents.map(s => s.name).join(', ')} — wish them a happy birthday!</p>
+          </div>
+        </div>
+      )}
+
       <div className="stat-row">
-        <div className="stat">
-          <strong>{today}</strong>
-        </div>
-        <div className="stat green">
-          <CheckCircle size={20} /> {todayAtt.filter(a => a.status === 'present').length} Present
-        </div>
-        <div className="stat red">
-          <XCircle size={20} /> {todayAtt.filter(a => a.status === 'absent').length} Absent
-        </div>
-        <div className="stat muted">
-          <Info size={20} /> {students.length - todayAtt.length} Not marked
-        </div>
+        <div className="stat"><strong>{today}</strong></div>
+        <div className="stat green"><CheckCircle size={20} /> {todayAtt.filter(a => a.status === 'present').length} Present</div>
+        <div className="stat red"><XCircle size={20} /> {todayAtt.filter(a => a.status === 'absent').length} Absent</div>
+        <div className="stat muted"><Info size={20} /> {students.length - todayAtt.length} Not marked</div>
       </div>
+
+      {!offDay && (
+        <div className="toolbar">
+          <button className="btn btn-green" onClick={markAllPresent} disabled={bulkLoading}>
+            <CheckCircle size={16} /> {bulkLoading ? 'Marking...' : 'Mark Everyone Present'}
+          </button>
+        </div>
+      )}
 
       <div className="list">
         {students.map(s => {
@@ -528,7 +576,8 @@ function TodayTab({ info }) {
             <div key={s._id} className="attendance-card">
               <div>
                 <strong>{s.name}</strong>
-                <p className="muted small">Roll #{s.rollNumber}</p>
+                {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂 Birthday!</span>}
+                <p className="muted small">Roll #{s.rollNumber}{s.subjects?.length ? ' · ' + s.subjects.join(', ') : ''}</p>
               </div>
               <div className="attendance-status">
                 {att ? (
@@ -540,29 +589,19 @@ function TodayTab({ info }) {
                         {att.outTime && ` - ${att.outTime}`}
                       </span>
                     ) : (
-                      <span className="badge red">
-                        <XCircle size={14} /> Absent {att.reason && `(${att.reason})`}
-                      </span>
+                      <span className="badge red"><XCircle size={14} /> Absent {att.reason && `(${att.reason})`}</span>
                     )}
                     {att.markedBy === 'teacher' && (
-                      <span className="badge gray" title="Teacher marked">
-                        <Info size={12} /> Marked by you
-                      </span>
+                      <span className="badge gray small" title="Teacher marked"><Info size={12} /> Marked by you</span>
                     )}
                     {att.markedBy === 'self' && (
-                      <span className="badge blue" title="Self marked">
-                        <Info size={12} /> Self-marked
-                      </span>
+                      <span className="badge blue small" title="Self marked"><Info size={12} /> Self-marked</span>
                     )}
                   </>
                 ) : (
                   <>
-                    <button className="btn-mini btn-green" onClick={() => markPresent(s._id)}>
-                      <CheckCircle size={14} /> Mark Present
-                    </button>
-                    <button className="btn-mini btn-red" onClick={() => setMarkingStudent(s)}>
-                      <XCircle size={14} /> Mark Absent
-                    </button>
+                    <button className="btn-mini btn-green" onClick={() => markPresent(s._id)}><CheckCircle size={14} /> Present</button>
+                    <button className="btn-mini btn-red" onClick={() => setMarkingStudent(s)}><XCircle size={14} /> Absent</button>
                   </>
                 )}
               </div>
@@ -591,6 +630,7 @@ function StudentsTab({ info }) {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState('name');
 
   const load = async () => {
     setLoading(true);
@@ -603,16 +643,21 @@ function StudentsTab({ info }) {
   useEffect(() => { load(); }, []);
 
   const del = async (id) => {
-    if (!confirm('Delete this student? All their attendance records will also be deleted.')) return;
+    if (!confirm('Delete this student? All their attendance records will be deleted too.')) return;
     await api.delete('/students/' + id);
     load();
   };
 
-  const filtered = students.filter(s =>
+  let filtered = students.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     (s.rollNumber || '').includes(search) ||
     (s.phone || '').includes(search)
   );
+  filtered = [...filtered].sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    if (sortBy === 'roll') return (a.rollNumber || '').localeCompare(b.rollNumber || '');
+    return 0;
+  });
 
   if (loading) return <p className="muted">Loading...</p>;
 
@@ -621,8 +666,12 @@ function StudentsTab({ info }) {
       <div className="toolbar">
         <div className="search-bar">
           <Search size={16} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search students" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, roll, or phone" />
         </div>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="sort-select">
+          <option value="name">Sort by Name</option>
+          <option value="roll">Sort by Roll #</option>
+        </select>
         <button className="btn btn-primary" onClick={() => setAdding(true)}>
           <Plus size={16} /> Add Student
         </button>
@@ -641,21 +690,22 @@ function StudentsTab({ info }) {
           <div key={s._id} className="student-card">
             <div>
               <strong>{s.name}</strong>
+              {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂</span>}
               <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
-              {s.subjects && s.subjects.length > 0 && (
-                <p className="small">Subjects: {s.subjects.join(', ')}</p>
+              {s.subjects?.length > 0 && <p className="small">Subjects: {s.subjects.join(', ')}</p>}
+              {s.parentPhone && (
+                <p className="small">
+                  Parent: {s.parentName || ''} ·{' '}
+                  <a href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
+                    <MessageCircle size={12} /> WhatsApp
+                  </a>
+                </p>
               )}
-              {s.registeredVia === 'self' && (
-                <span className="badge blue small">Self-registered</span>
-              )}
+              {s.registeredVia === 'self' && <span className="badge blue small">Self-registered</span>}
             </div>
             <div className="row-buttons">
-              <button className="icon-btn" onClick={() => setEditing(s)} title="Edit">
-                <Edit2 size={16} />
-              </button>
-              <button className="icon-btn icon-btn-danger" onClick={() => del(s._id)} title="Delete">
-                <Trash2 size={16} />
-              </button>
+              <button className="icon-btn" onClick={() => setEditing(s)} title="Edit"><Edit2 size={16} /></button>
+              <button className="icon-btn icon-btn-danger" onClick={() => del(s._id)} title="Delete"><Trash2 size={16} /></button>
             </div>
           </div>
         ))}
@@ -676,7 +726,7 @@ function StudentsTab({ info }) {
 function StudentForm({ info, student, onClose, onSaved }) {
   const [form, setForm] = useState(student || {
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', subjects: [], notes: ''
+    aadhar: '', birthday: '', subjects: [], notes: ''
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -684,9 +734,7 @@ function StudentForm({ info, student, onClose, onSaved }) {
   const toggleSubject = (s) => {
     setForm(f => ({
       ...f,
-      subjects: (f.subjects || []).includes(s)
-        ? f.subjects.filter(x => x !== s)
-        : [...(f.subjects || []), s]
+      subjects: (f.subjects || []).includes(s) ? f.subjects.filter(x => x !== s) : [...(f.subjects || []), s]
     }));
   };
 
@@ -709,7 +757,7 @@ function StudentForm({ info, student, onClose, onSaved }) {
     } finally { setSaving(false); }
   };
 
-  const availableSubjects = info.subjects && info.subjects.length ? info.subjects : ['Mathematics', 'Science', 'English'];
+  const availableSubjects = info.subjects?.length ? info.subjects : ['Mathematics', 'Science', 'English'];
 
   return (
     <Modal onClose={onClose} title={student ? 'Edit Student' : 'Add New Student'}>
@@ -717,6 +765,8 @@ function StudentForm({ info, student, onClose, onSaved }) {
       <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} autoFocus />
       <label>Phone</label>
       <input value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
+      <label>Date of Birth</label>
+      <input type="date" value={form.birthday || ''} onChange={e => setForm({...form, birthday: e.target.value})} />
       <label>Parent Name</label>
       <input value={form.parentName || ''} onChange={e => setForm({...form, parentName: e.target.value})} />
       <label>Parent Phone</label>
@@ -727,11 +777,7 @@ function StudentForm({ info, student, onClose, onSaved }) {
       <div className="checkbox-group">
         {availableSubjects.map(s => (
           <label key={s} className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={(form.subjects || []).includes(s)}
-              onChange={() => toggleSubject(s)}
-            />
+            <input type="checkbox" checked={(form.subjects || []).includes(s)} onChange={() => toggleSubject(s)} />
             <span>{s}</span>
           </label>
         ))}
@@ -749,13 +795,14 @@ function StudentForm({ info, student, onClose, onSaved }) {
   );
 }
 
-function SummaryTab() {
+function SummaryTab({ info }) {
   const [students, setStudents] = useState([]);
   const [selected, setSelected] = useState(null);
   const [summary, setSummary] = useState(null);
   const [history, setHistory] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [monthFilter, setMonthFilter] = useState(''); // YYYY-MM
 
   useEffect(() => {
     api.get('/students').then(r => {
@@ -783,9 +830,20 @@ function SummaryTab() {
     </div>
   );
 
-  const filtered = students.filter(s =>
-    s.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = students.filter(s => s.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredHistory = monthFilter ? history.filter(h => h.date.startsWith(monthFilter)) : history;
+  const monthOptions = Array.from(new Set(history.map(h => h.date.substring(0, 7)))).sort().reverse();
+
+  const shareWithParent = () => {
+    if (!selected || !summary) return;
+    const msg = `Hi! Attendance update for ${selected.name} (Roll #${selected.rollNumber}) from ${info.classroomName || 'our coaching center'}:\n\n` +
+      `✅ Days Present: ${summary.present}\n` +
+      `❌ Days Absent: ${summary.absent}\n` +
+      `📊 Attendance: ${summary.percentage}%\n\n` +
+      (summary.absentDays.length ? `Recent absences:\n${summary.absentDays.slice(0, 3).map(a => `• ${a.date} - ${a.reason}`).join('\n')}\n\n` : '') +
+      `- ${info.teacherName || 'Teacher'}`;
+    window.open(whatsappLink(selected.parentPhone, msg), '_blank');
+  };
 
   return (
     <div className="summary-grid">
@@ -796,11 +854,7 @@ function SummaryTab() {
         </div>
         <div className="list">
           {filtered.map(s => (
-            <button
-              key={s._id}
-              className={'list-item' + (selected?._id === s._id ? ' active' : '')}
-              onClick={() => loadStudent(s)}
-            >
+            <button key={s._id} className={'list-item' + (selected?._id === s._id ? ' active' : '')} onClick={() => loadStudent(s)}>
               <div>
                 <strong>{s.name}</strong>
                 <p className="muted small">Roll #{s.rollNumber}</p>
@@ -819,39 +873,47 @@ function SummaryTab() {
           </div>
         ) : (
           <>
-            <h2 className="display">{selected.name}</h2>
-            <p className="muted">Roll #{selected.rollNumber}</p>
+            <div className="row" style={{justifyContent: 'space-between', flexWrap: 'wrap'}}>
+              <div>
+                <h2 className="display">{selected.name}</h2>
+                <p className="muted">Roll #{selected.rollNumber}{selected.subjects?.length ? ' · ' + selected.subjects.join(', ') : ''}</p>
+              </div>
+              {selected.parentPhone && (
+                <button className="btn btn-whatsapp" onClick={shareWithParent}>
+                  <Share2 size={14} /> Share with Parent
+                </button>
+              )}
+            </div>
+
             {summary && (
               <div className="summary-stats">
-                <div className="stat-big green">
-                  <strong>{summary.present}</strong>
-                  <span>Present</span>
-                </div>
-                <div className="stat-big red">
-                  <strong>{summary.absent}</strong>
-                  <span>Absent</span>
-                </div>
-                <div className="stat-big blue">
-                  <strong>{summary.percentage}%</strong>
-                  <span>Attendance</span>
-                </div>
+                <div className="stat-big green"><strong>{summary.present}</strong><span>Present</span></div>
+                <div className="stat-big red"><strong>{summary.absent}</strong><span>Absent</span></div>
+                <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
               </div>
             )}
-            <h3>Attendance History</h3>
+
+            <div className="row" style={{justifyContent: 'space-between'}}>
+              <h3>Attendance History</h3>
+              {monthOptions.length > 0 && (
+                <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sort-select">
+                  <option value="">All months</option>
+                  {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
+            </div>
             <div className="list">
-              {history.length === 0 && <p className="muted">No records yet.</p>}
-              {history.map(h => (
+              {filteredHistory.length === 0 && <p className="muted">No records for this period.</p>}
+              {filteredHistory.map(h => (
                 <div key={h._id} className="history-row">
                   <div>
-                    <strong>{h.date}</strong>
+                    <strong>{formatDate(h.date)}</strong>
                     {h.status === 'present' ? (
                       <span className="badge green small">
                         <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
                       </span>
                     ) : (
-                      <span className="badge red small">
-                        <XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}
-                      </span>
+                      <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
                     )}
                   </div>
                   {h.markedBy === 'teacher' && <span className="small muted">Marked by you</span>}
@@ -866,7 +928,7 @@ function SummaryTab() {
   );
 }
 
-function AnnouncementsTab() {
+function AnnouncementsTab({ info }) {
   const [list, setList] = useState([]);
   const [adding, setAdding] = useState(false);
   const [type, setType] = useState('general');
@@ -899,15 +961,24 @@ function AnnouncementsTab() {
     load();
   };
 
+  const shareViaWhatsApp = (a) => {
+    let text = `📢 *${info.classroomName || 'Coaching Center'}*\n\n`;
+    if (a.type === 'off-day') {
+      text += `🏖️ *Holiday Notice*\n${a.message}\n\nDates: ${a.dates.join(', ')}\n\n`;
+    } else {
+      text += `${a.message}\n\n`;
+    }
+    text += `- ${info.teacherName || 'Teacher'}`;
+    window.open(whatsappLink(null, text), '_blank');
+  };
+
   if (loading) return <p className="muted">Loading...</p>;
 
   return (
     <div>
       <div className="toolbar">
         <h2 className="display">Announcements</h2>
-        <button className="btn btn-primary" onClick={() => setAdding(true)}>
-          <Plus size={16} /> New Announcement
-        </button>
+        <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16} /> New Announcement</button>
       </div>
 
       {list.length === 0 && (
@@ -921,21 +992,22 @@ function AnnouncementsTab() {
       <div className="list">
         {list.map(a => (
           <div key={a._id} className="announcement-card">
-            <div>
+            <div style={{flex: 1}}>
               {a.type === 'off-day' ? (
                 <span className="badge red"><CalendarOff size={12} /> Off Day</span>
               ) : (
                 <span className="badge blue"><MessageSquare size={12} /> General</span>
               )}
               <p>{a.message}</p>
-              {a.dates && a.dates.length > 0 && (
-                <p className="small muted">Dates: {a.dates.join(', ')}</p>
-              )}
+              {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
               <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
             </div>
-            <button className="icon-btn icon-btn-danger" onClick={() => del(a._id)}>
-              <Trash2 size={16} />
-            </button>
+            <div className="row-buttons">
+              <button className="btn btn-whatsapp btn-mini" onClick={() => shareViaWhatsApp(a)} title="Share via WhatsApp">
+                <Share2 size={14} /> Share
+              </button>
+              <button className="icon-btn icon-btn-danger" onClick={() => del(a._id)}><Trash2 size={16} /></button>
+            </div>
           </div>
         ))}
       </div>
@@ -959,13 +1031,12 @@ function AnnouncementsTab() {
             <>
               <label>Dates (comma-separated, format: YYYY-MM-DD)</label>
               <input value={dates} onChange={e => setDates(e.target.value)} placeholder="2026-01-26, 2026-08-15" />
+              <p className="small muted">When today matches any of these dates, a "Holiday" banner will show everywhere.</p>
             </>
           )}
           <div className="modal-buttons">
             <button className="btn btn-outline" onClick={() => setAdding(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={send}>
-              <Send size={14} /> Send to All
-            </button>
+            <button className="btn btn-primary" onClick={send}><Send size={14} /> Save & Send</button>
           </div>
         </Modal>
       )}
@@ -1039,19 +1110,15 @@ function SettingsTab({ info }) {
         ))}
       </div>
       <div className="row">
-        <input value={subjectInput} onChange={e => setSubjectInput(e.target.value)} placeholder="Add a subject" onKeyDown={e => e.key === 'Enter' && addSubject()} />
-        <button className="btn btn-outline" onClick={addSubject}>
-          <Plus size={14} /> Add
-        </button>
+        <input value={subjectInput} onChange={e => setSubjectInput(e.target.value)} placeholder="Add a subject" onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addSubject())} />
+        <button className="btn btn-outline" onClick={addSubject}><Plus size={14} /> Add</button>
       </div>
 
       <hr />
 
       <div className="row">
         <h3>Change Passwords</h3>
-        <button className="btn-link" onClick={() => setShowPwd(!showPwd)}>
-          {showPwd ? 'Cancel' : 'Change passwords'}
-        </button>
+        <button className="btn-link" onClick={() => setShowPwd(!showPwd)}>{showPwd ? 'Cancel' : 'Change passwords'}</button>
       </div>
       {showPwd && (
         <>
@@ -1074,26 +1141,22 @@ function SettingsTab({ info }) {
 // ============================
 // STUDENT DASHBOARD
 // ============================
-function StudentDashboard({ student, info, onSignOut }) {
+function StudentDashboard({ student, info, announcements, onSignOut }) {
   const [tab, setTab] = useState('today');
   const [todayAtt, setTodayAtt] = useState(null);
   const [history, setHistory] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [announcements, setAnnouncements] = useState([]);
 
   const load = async () => {
     if (!student) return;
     try {
-      const [hist, summ, anns] = await Promise.all([
+      const [hist, summ] = await Promise.all([
         api.get('/attendance/student/' + student._id),
         api.get('/attendance/summary/' + student._id),
-        api.get('/announcements'),
       ]);
       setHistory(hist.data);
       setSummary(summ.data);
-      setAnnouncements(anns.data);
-      const today = new Date().toISOString().split('T')[0];
-      setTodayAtt(hist.data.find(h => h.date === today));
+      setTodayAtt(hist.data.find(h => h.date === todayISO()));
     } catch (err) { console.error(err); }
   };
 
@@ -1113,6 +1176,8 @@ function StudentDashboard({ student, info, onSignOut }) {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
+  const offDay = isOffDayToday(announcements);
+
   return (
     <div className="page">
       <header className="dashboard-header">
@@ -1120,24 +1185,16 @@ function StudentDashboard({ student, info, onSignOut }) {
           <h1 className="display">Hi, {student?.name}</h1>
           <p className="muted">Roll #{student?.rollNumber}</p>
         </div>
-        <button className="btn btn-outline" onClick={onSignOut}>
-          <LogOut size={16} /> Sign out
-        </button>
+        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
       </header>
 
+      <OffDayBanner announcements={announcements} />
+
       <nav className="tabs">
-        <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}>
-          <Calendar size={16} /> Today
-        </button>
-        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>
-          <BarChart3 size={16} /> My Attendance
-        </button>
-        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
-          <Megaphone size={16} /> Updates
-        </button>
-        <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}>
-          <Info size={16} /> Class Info
-        </button>
+        <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}><Calendar size={16} /> Today</button>
+        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}><BarChart3 size={16} /> My Attendance</button>
+        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Updates</button>
+        <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}><Info size={16} /> Class Info</button>
       </nav>
 
       <main className="tab-content">
@@ -1146,7 +1203,14 @@ function StudentDashboard({ student, info, onSignOut }) {
             <h2 className="display">
               {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'long', day: 'numeric' })}
             </h2>
-            {todayAtt ? (
+            {offDay ? (
+              <div className="big-card muted-card">
+                <CalendarOff size={48} />
+                <h3>Today is a holiday</h3>
+                <p>{offDay.message}</p>
+                <p className="muted small">No check-in needed today</p>
+              </div>
+            ) : todayAtt ? (
               <div className="big-card green">
                 <CheckCircle size={48} />
                 <h3>You're marked Present!</h3>
@@ -1171,39 +1235,36 @@ function StudentDashboard({ student, info, onSignOut }) {
                 </button>
               </div>
             )}
+
+            {summary && (
+              <div className="summary-stats" style={{marginTop: 24}}>
+                <div className="stat-big green"><strong>{summary.present}</strong><span>Days Present</span></div>
+                <div className="stat-big red"><strong>{summary.absent}</strong><span>Days Absent</span></div>
+                <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
+              </div>
+            )}
           </div>
         )}
 
         {tab === 'history' && summary && (
           <div>
             <div className="summary-stats">
-              <div className="stat-big green">
-                <strong>{summary.present}</strong>
-                <span>Days Present</span>
-              </div>
-              <div className="stat-big red">
-                <strong>{summary.absent}</strong>
-                <span>Days Absent</span>
-              </div>
-              <div className="stat-big blue">
-                <strong>{summary.percentage}%</strong>
-                <span>Attendance</span>
-              </div>
+              <div className="stat-big green"><strong>{summary.present}</strong><span>Days Present</span></div>
+              <div className="stat-big red"><strong>{summary.absent}</strong><span>Days Absent</span></div>
+              <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
             </div>
             <h3>Recent History</h3>
             <div className="list">
               {history.length === 0 && <p className="muted">No records yet.</p>}
               {history.map(h => (
                 <div key={h._id} className="history-row">
-                  <strong>{h.date}</strong>
+                  <strong>{formatDate(h.date)}</strong>
                   {h.status === 'present' ? (
                     <span className="badge green small">
                       <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
                     </span>
                   ) : (
-                    <span className="badge red small">
-                      <XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}
-                    </span>
+                    <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
                   )}
                 </div>
               ))}
@@ -1230,7 +1291,7 @@ function StudentDashboard({ student, info, onSignOut }) {
                       <span className="badge blue"><MessageSquare size={12} /> Update</span>
                     )}
                     <p>{a.message}</p>
-                    {a.dates && a.dates.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
+                    {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
                     <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
                   </div>
                 </div>
@@ -1248,30 +1309,32 @@ function StudentDashboard({ student, info, onSignOut }) {
 // ============================
 // PARENT DASHBOARD
 // ============================
-function ParentDashboard({ student, info, onSignOut }) {
+function ParentDashboard({ student, info, announcements, onSignOut }) {
   const [tab, setTab] = useState('summary');
   const [history, setHistory] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [announcements, setAnnouncements] = useState([]);
+  const [monthFilter, setMonthFilter] = useState('');
 
   const load = async () => {
     if (!student) return;
     try {
-      const [hist, summ, anns] = await Promise.all([
+      const [hist, summ] = await Promise.all([
         api.get('/attendance/student/' + student._id),
         api.get('/attendance/summary/' + student._id),
-        api.get('/announcements'),
       ]);
       setHistory(hist.data);
       setSummary(summ.data);
-      setAnnouncements(anns.data);
     } catch (err) { console.error(err); }
   };
 
   useEffect(() => { load(); }, [student]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
   const todayAtt = history.find(h => h.date === today);
+  const offDay = isOffDayToday(announcements);
+
+  const filteredHistory = monthFilter ? history.filter(h => h.date.startsWith(monthFilter)) : history;
+  const monthOptions = Array.from(new Set(history.map(h => h.date.substring(0, 7)))).sort().reverse();
 
   return (
     <div className="page">
@@ -1280,31 +1343,29 @@ function ParentDashboard({ student, info, onSignOut }) {
           <h1 className="display">{student?.name}'s Attendance</h1>
           <p className="muted">Roll #{student?.rollNumber}</p>
         </div>
-        <button className="btn btn-outline" onClick={onSignOut}>
-          <LogOut size={16} /> Sign out
-        </button>
+        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
       </header>
 
+      <OffDayBanner announcements={announcements} />
+
       <nav className="tabs">
-        <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}>
-          <BarChart3 size={16} /> Summary
-        </button>
-        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>
-          <Calendar size={16} /> History
-        </button>
-        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}>
-          <Megaphone size={16} /> Updates
-        </button>
-        <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}>
-          <Info size={16} /> Class Info
-        </button>
+        <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
+        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}><Calendar size={16} /> History</button>
+        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Updates</button>
+        <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}><Info size={16} /> Class Info</button>
       </nav>
 
       <main className="tab-content">
         {tab === 'summary' && summary && (
           <div>
             <div className="today-status">
-              {todayAtt ? (
+              {offDay ? (
+                <div className="big-card muted-card">
+                  <CalendarOff size={48} />
+                  <h3>Today is a holiday</h3>
+                  <p>{offDay.message}</p>
+                </div>
+              ) : todayAtt ? (
                 <div className={'big-card ' + (todayAtt.status === 'present' ? 'green' : 'red')}>
                   {todayAtt.status === 'present' ? <CheckCircle size={48} /> : <XCircle size={48} />}
                   <h3>Today: {todayAtt.status === 'present' ? 'Present' : 'Absent'}</h3>
@@ -1324,27 +1385,18 @@ function ParentDashboard({ student, info, onSignOut }) {
             </div>
 
             <div className="summary-stats">
-              <div className="stat-big green">
-                <strong>{summary.present}</strong>
-                <span>Days Present</span>
-              </div>
-              <div className="stat-big red">
-                <strong>{summary.absent}</strong>
-                <span>Days Absent</span>
-              </div>
-              <div className="stat-big blue">
-                <strong>{summary.percentage}%</strong>
-                <span>Attendance</span>
-              </div>
+              <div className="stat-big green"><strong>{summary.present}</strong><span>Days Present</span></div>
+              <div className="stat-big red"><strong>{summary.absent}</strong><span>Days Absent</span></div>
+              <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
             </div>
 
-            {summary.absentDays && summary.absentDays.length > 0 && (
+            {summary.absentDays?.length > 0 && (
               <>
                 <h3>Recent Absences</h3>
                 <div className="list">
                   {summary.absentDays.slice(0, 5).map((a, i) => (
                     <div key={i} className="history-row">
-                      <strong>{a.date}</strong>
+                      <strong>{formatDate(a.date)}</strong>
                       <span className="small muted">{a.reason}</span>
                     </div>
                   ))}
@@ -1356,21 +1408,27 @@ function ParentDashboard({ student, info, onSignOut }) {
 
         {tab === 'history' && (
           <div>
-            <h3>Full Attendance Record</h3>
+            <div className="row" style={{justifyContent: 'space-between'}}>
+              <h3>Full Attendance Record</h3>
+              {monthOptions.length > 0 && (
+                <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sort-select">
+                  <option value="">All months</option>
+                  {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
+            </div>
             <div className="list">
-              {history.length === 0 && <p className="muted">No records yet.</p>}
-              {history.map(h => (
+              {filteredHistory.length === 0 && <p className="muted">No records for this period.</p>}
+              {filteredHistory.map(h => (
                 <div key={h._id} className="history-row">
                   <div>
-                    <strong>{h.date}</strong>
+                    <strong>{formatDate(h.date)}</strong>
                     {h.status === 'present' ? (
                       <span className="badge green small">
                         <CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime} - ${h.outTime || '?'}`}
                       </span>
                     ) : (
-                      <span className="badge red small">
-                        <XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}
-                      </span>
+                      <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
                     )}
                   </div>
                   {h.markedBy === 'teacher' && <span className="small muted">Marked by teacher</span>}
@@ -1400,7 +1458,7 @@ function ParentDashboard({ student, info, onSignOut }) {
                       <span className="badge blue"><MessageSquare size={12} /> Update</span>
                     )}
                     <p>{a.message}</p>
-                    {a.dates && a.dates.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
+                    {a.dates?.length > 0 && <p className="small muted">Dates: {a.dates.join(', ')}</p>}
                     <p className="small muted">{new Date(a.createdAt).toLocaleString()}</p>
                   </div>
                 </div>
@@ -1416,50 +1474,35 @@ function ParentDashboard({ student, info, onSignOut }) {
 }
 
 // ============================
-// SHARED: CLASS INFO
+// CLASS INFO
 // ============================
 function ClassInfo({ info }) {
   return (
     <div className="container-narrow">
       <h2 className="display">{info.classroomName || 'Coaching Center'}</h2>
       <div className="info-grid">
-        {info.teacherName && (
-          <div className="info-row">
-            <User size={18} /><span>Teacher: {info.teacherName}</span>
-          </div>
-        )}
+        {info.teacherName && <div className="info-row"><User size={18} /><span>Teacher: {info.teacherName}</span></div>}
         {info.phone && (
           <div className="info-row">
-            <Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a>
+            <Phone size={18} />
+            <a href={`tel:${info.phone}`}>{info.phone}</a>
+            {' · '}
+            <a href={whatsappLink(info.phone, 'Hello, I have a query about the coaching center.')} target="_blank" rel="noreferrer" className="wa-link">
+              <MessageCircle size={14} /> WhatsApp
+            </a>
           </div>
         )}
-        {info.email && (
-          <div className="info-row">
-            <Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a>
-          </div>
-        )}
-        {info.mapUrl && (
-          <div className="info-row">
-            <MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location on Map</a>
-          </div>
-        )}
-        {info.classStart && info.classEnd && (
-          <div className="info-row">
-            <Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span>
-          </div>
-        )}
-        {info.subjects && info.subjects.length > 0 && (
-          <div className="info-row">
-            <BookOpen size={18} /><span>Subjects: {info.subjects.join(', ')}</span>
-          </div>
-        )}
+        {info.email && <div className="info-row"><Mail size={18} /><a href={`mailto:${info.email}`}>{info.email}</a></div>}
+        {info.mapUrl && <div className="info-row"><MapPin size={18} /><a href={info.mapUrl} target="_blank" rel="noreferrer">View Location on Map</a></div>}
+        {info.classStart && info.classEnd && <div className="info-row"><Clock size={18} /><span>Class: {info.classStart} - {info.classEnd}</span></div>}
+        {info.subjects?.length > 0 && <div className="info-row"><BookOpen size={18} /><span>Subjects: {info.subjects.join(', ')}</span></div>}
       </div>
     </div>
   );
 }
 
 // ============================
-// SHARED: MODAL
+// MODAL
 // ============================
 function Modal({ title, children, onClose }) {
   return (

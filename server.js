@@ -51,11 +51,16 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost/coaching')
 // SCHEMAS
 // ===========================
 
-// Subjects now carry a monthly fee.
+// Subjects are just names now. Fees live on the class.
 const SubjectSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  monthlyFee: { type: Number, default: 0 },
 }, { _id: false });
+
+// A class (8th, 10th, etc) carries the monthly fee.
+const ClassSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  monthlyFee: { type: Number, default: 0 },
+});
 
 // A batch is a group of students that meets at a specific time.
 // weeklyOffDays is an array of weekday numbers (0=Sun, 1=Mon, ... 6=Sat).
@@ -68,8 +73,8 @@ const BatchSchema = new mongoose.Schema({
 
 const ConfigSchema = new mongoose.Schema({
   teacherPassword: String,
-  studentPassword: String,
-  parentPassword: String, // legacy / fallback - parents now use unique codes
+  // studentPassword removed - students mark themselves on the teacher's device
+  // parentPassword removed - parents log in with their unique 6-char code
   teacherName: String,
   phone: String,
   email: String,
@@ -77,9 +82,9 @@ const ConfigSchema = new mongoose.Schema({
   mapUrl: String,
   classStart: String,
   classEnd: String,
-  // Old format was [String]; new format is [{name, monthlyFee}].
-  // Mongoose will store whatever we put; we'll always read+write the new format.
+  // Subjects are just names; fees attach to classes.
   subjects: { type: [SubjectSchema], default: [] },
+  classes:  { type: [ClassSchema],   default: [] },
   batches:  { type: [BatchSchema],   default: [] },
 });
 
@@ -91,7 +96,8 @@ const StudentSchema = new mongoose.Schema({
   parentPhone: String,
   aadhar: String,
   birthday: String,
-  subjects: { type: [String], default: [] }, // subject names; fees live on Config
+  subjects: { type: [String], default: [] }, // subject names; just for organization, no fee impact
+  className: { type: String, default: '' },   // name of the class (fees come from Config.classes)
   batchId: { type: String, default: '' },     // _id of a Config.batches entry, or '' for none
   parentCode: { type: String, index: true },  // unique code for parent login (no other password needed)
   notes: String,
@@ -193,16 +199,15 @@ app.post('/api/auth/setup', async (req, res) => {
   try {
     const existing = await Config.findOne();
     if (existing) return res.status(400).json({ error: 'Already set up' });
-    const { teacherPassword, studentPassword, parentPassword, subjects, ...rest } = req.body;
-    // Normalize subjects: accept [String] or [{name, monthlyFee}]
-    const normSubjects = (subjects || []).map(s =>
-      typeof s === 'string' ? { name: s, monthlyFee: 0 } : { name: s.name, monthlyFee: Number(s.monthlyFee) || 0 }
+    const { teacherPassword, subjects, classes, ...rest } = req.body;
+    const normSubjects = (subjects || []).map(s => typeof s === 'string' ? { name: s } : { name: s.name });
+    const normClasses = (classes || []).map(c =>
+      typeof c === 'string' ? { name: c, monthlyFee: 0 } : { name: c.name, monthlyFee: Number(c.monthlyFee) || 0 }
     );
     const config = new Config({
       teacherPassword: await bcrypt.hash(teacherPassword, 10),
-      studentPassword: await bcrypt.hash(studentPassword, 10),
-      parentPassword: await bcrypt.hash(parentPassword || teacherPassword, 10),
       subjects: normSubjects,
+      classes: normClasses,
       ...rest,
     });
     await config.save();
@@ -213,7 +218,7 @@ app.post('/api/auth/setup', async (req, res) => {
   }
 });
 
-// Password login: for teacher and student roles (parents now use code).
+// Password login: teacher only. Parents use code; students never log in.
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { password } = req.body;
@@ -221,28 +226,22 @@ app.post('/api/auth/login', async (req, res) => {
     const config = await Config.findOne();
     if (!config) return res.status(401).json({ error: 'System not set up' });
     const isT = await bcrypt.compare(password, config.teacherPassword);
-    const isS = await bcrypt.compare(password, config.studentPassword);
-    if (!isT && !isS) return res.status(401).json({ error: 'Wrong password' });
-    const role = isT ? 'teacher' : 'student';
-    const token = jwt.sign({ role }, JWT_SECRET);
-    if (role === 'student') {
-      const students = await Student.find().select('_id name rollNumber subjects batchId').sort({ name: 1 });
-      return res.json({ token, role, students });
-    }
-    res.json({ token, role });
+    if (!isT) return res.status(401).json({ error: 'Wrong password' });
+    const token = jwt.sign({ role: 'teacher' }, JWT_SECRET);
+    res.json({ token, role: 'teacher' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Parent login by unique code. Bypasses any password.
+// Parent login by unique code. Token lasts 365 days so they stay signed in.
 app.post('/api/auth/parent-login', async (req, res) => {
   try {
     const code = (req.body.code || '').trim().toUpperCase();
     if (!code) return res.status(401).json({ error: 'Code required' });
     const student = await Student.findOne({ parentCode: code });
     if (!student) return res.status(401).json({ error: 'Invalid code' });
-    const token = jwt.sign({ role: 'parent', studentId: String(student._id) }, JWT_SECRET);
+    const token = jwt.sign({ role: 'parent', studentId: String(student._id) }, JWT_SECRET, { expiresIn: '365d' });
     res.json({ token, role: 'parent', student });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -255,7 +254,7 @@ app.post('/api/auth/parent-login', async (req, res) => {
 
 app.get('/api/public/info', async (req, res) => {
   try {
-    const config = await Config.findOne().select('-teacherPassword -studentPassword -parentPassword');
+    const config = await Config.findOne().select('-teacherPassword');
     res.json(config || {});
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -264,7 +263,7 @@ app.get('/api/public/info', async (req, res) => {
 
 app.post('/api/public/register', async (req, res) => {
   try {
-    const { name, phone, parentName, parentPhone, aadhar, birthday, subjects, notes } = req.body;
+    const { name, phone, parentName, parentPhone, aadhar, birthday, subjects, className, batchId, notes } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'Name and phone are required' });
     const count = await Student.countDocuments();
     const rollNumber = String(count + 1).padStart(3, '0');
@@ -272,6 +271,8 @@ app.post('/api/public/register', async (req, res) => {
     const student = new Student({
       name, phone, parentName, parentPhone, aadhar, birthday,
       subjects: subjects || [],
+      className: className || '',
+      batchId: batchId || '',
       notes,
       rollNumber,
       parentCode,
@@ -280,7 +281,7 @@ app.post('/api/public/register', async (req, res) => {
       registeredVia: 'self',
     });
     await student.save();
-    res.json({ ok: true, message: 'Registered successfully! Login with the student password.', student });
+    res.json({ ok: true, message: 'Registered. Your parent code is ' + parentCode + ' — keep it safe.', student });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -425,6 +426,31 @@ app.post('/api/attendance/check', authenticate, async (req, res) => {
     if (action === 'in')  attendance.inTime  = timeStr;
     if (action === 'out') attendance.outTime = timeStr;
     attendance.status = 'present';
+    await attendance.save();
+    res.json(attendance);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Student-mode mark: teacher's session, but markedBy='self' because the student
+// physically tapped their own name on the teacher's device.
+app.post('/api/attendance/self-mark', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const { studentId } = req.body;
+    if (!studentId) return res.status(400).json({ error: 'studentId required' });
+    const today = istDateISO();
+    const timeStr = istTimeHM();
+    let attendance = await Attendance.findOne({ studentId, date: today });
+    if (!attendance) {
+      attendance = new Attendance({
+        studentId, date: today, status: 'present', markedBy: 'self', inTime: timeStr,
+      });
+    } else {
+      attendance.status = 'present';
+      attendance.markedBy = 'self';
+      if (!attendance.inTime) attendance.inTime = timeStr;
+    }
     await attendance.save();
     res.json(attendance);
   } catch (err) {
@@ -625,7 +651,7 @@ const computeStudentFees = (student, config, yyyymm) => {
   const month = Number(mStr); // 1..12
   if (!year || !month) return null;
 
-  // Determine off days from batch (else default to Sunday).
+  // Off days come from the student's batch, else Sunday only.
   let offDays = [0];
   if (student.batchId && config?.batches?.length) {
     const batch = config.batches.id ? config.batches.id(student.batchId) :
@@ -635,18 +661,17 @@ const computeStudentFees = (student, config, yyyymm) => {
 
   const { working, total } = workingDaysInMonth(year, month, offDays);
 
-  // Per-subject monthly fee
-  const subjectsBreakdown = (student.subjects || []).map(name => {
-    const sub = (config?.subjects || []).find(s => s.name === name);
-    const monthly = sub ? Number(sub.monthlyFee) || 0 : 0;
-    const perDay = working ? monthly / working : 0;
-    return { name, monthlyFee: monthly, perDay };
-  });
+  // Fee is taken from the student's class.
+  const cls = (config?.classes || []).find(c => c.name === student.className);
+  const monthlyFee = cls ? Number(cls.monthlyFee) || 0 : 0;
+  const perDay = working ? monthlyFee / working : 0;
 
-  const monthlyTotal = subjectsBreakdown.reduce((a, s) => a + s.monthlyFee, 0);
-  const perDayTotal  = subjectsBreakdown.reduce((a, s) => a + s.perDay, 0);
-
-  return { year, month, workingDays: working, totalDays: total, offWeekday: offDays, subjects: subjectsBreakdown, monthlyTotal, perDayTotal };
+  return {
+    year, month,
+    workingDays: working, totalDays: total, offWeekday: offDays,
+    className: student.className || '',
+    monthlyFee, perDay,
+  };
 };
 
 app.get('/api/fees/student/:id', authenticate, async (req, res) => {
@@ -673,12 +698,13 @@ app.get('/api/fees/summary', authenticate, teacherOnly, async (req, res) => {
       return {
         _id: s._id, name: s.name, rollNumber: s.rollNumber,
         batchId: s.batchId || '',
+        className: s.className || '',
         subjects: s.subjects || [],
         fees,
       };
     });
-    const grandMonthly = rows.reduce((a, r) => a + (r.fees?.monthlyTotal || 0), 0);
-    const grandDaily   = rows.reduce((a, r) => a + (r.fees?.perDayTotal   || 0), 0);
+    const grandMonthly = rows.reduce((a, r) => a + (r.fees?.monthlyFee || 0), 0);
+    const grandDaily   = rows.reduce((a, r) => a + (r.fees?.perDay     || 0), 0);
     res.json({ month: yyyymm, students: rows, grandMonthly, grandDaily });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -691,7 +717,7 @@ app.get('/api/fees/summary', authenticate, teacherOnly, async (req, res) => {
 
 app.get('/api/config', authenticate, async (req, res) => {
   try {
-    const config = await Config.findOne().select('-teacherPassword -studentPassword -parentPassword');
+    const config = await Config.findOne().select('-teacherPassword');
     res.json(config);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -702,19 +728,25 @@ app.put('/api/config', authenticate, teacherOnly, async (req, res) => {
   try {
     const config = await Config.findOne();
     if (!config) return res.status(404).json({ error: 'Not found' });
-    const { teacherPassword, studentPassword, parentPassword, subjects, batches, ...rest } = req.body;
+    const { teacherPassword, subjects, classes, batches, ...rest } = req.body;
 
-    // Normalize subjects to the new format. Accept either ["Math"] or [{name, monthlyFee}].
+    // Subjects are just names now.
     if (subjects !== undefined) {
       config.subjects = (subjects || []).map(s =>
-        typeof s === 'string'
-          ? { name: s, monthlyFee: 0 }
-          : { name: s.name, monthlyFee: Number(s.monthlyFee) || 0 }
+        typeof s === 'string' ? { name: s } : { name: s.name }
       );
+    }
+    // Classes carry the monthly fee.
+    if (classes !== undefined) {
+      config.classes = (classes || []).map(c => ({
+        _id: c._id,
+        name: c.name,
+        monthlyFee: Number(c.monthlyFee) || 0,
+      }));
     }
     if (batches !== undefined) {
       config.batches = (batches || []).map(b => ({
-        _id: b._id, // preserve id if present
+        _id: b._id,
         name: b.name,
         startTime: b.startTime || '09:00',
         endTime:   b.endTime   || '11:00',
@@ -724,11 +756,50 @@ app.put('/api/config', authenticate, teacherOnly, async (req, res) => {
 
     Object.assign(config, rest);
     if (teacherPassword) config.teacherPassword = await bcrypt.hash(teacherPassword, 10);
-    if (studentPassword) config.studentPassword = await bcrypt.hash(studentPassword, 10);
-    if (parentPassword)  config.parentPassword  = await bcrypt.hash(parentPassword, 10);
     await config.save();
-    const safe = await Config.findById(config._id).select('-teacherPassword -studentPassword -parentPassword');
+    const safe = await Config.findById(config._id).select('-teacherPassword');
     res.json({ ok: true, config: safe });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// STORAGE STATS (MongoDB Atlas usage)
+// ===========================
+app.get('/api/storage', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    const stats = await db.stats();
+    // Collect per-collection sizes so the UI can render an iPhone-style breakdown.
+    const collections = await db.listCollections().toArray();
+    const perCollection = [];
+    for (const c of collections) {
+      try {
+        const cs = await db.command({ collStats: c.name });
+        perCollection.push({
+          name: c.name,
+          count: cs.count || 0,
+          size: cs.size || 0,
+          storageSize: cs.storageSize || 0,
+          indexSize: cs.totalIndexSize || 0,
+        });
+      } catch (_) { /* ignore individual collection errors */ }
+    }
+    perCollection.sort((a, b) => b.size - a.size);
+
+    // Atlas free tier (M0) cap is 512 MB. Configurable via env for paid tiers.
+    const cap = Number(process.env.MONGO_STORAGE_CAP_MB || 512) * 1024 * 1024;
+    res.json({
+      dataSize: stats.dataSize || 0,
+      indexSize: stats.indexSize || 0,
+      storageSize: stats.storageSize || 0,
+      totalUsed: (stats.dataSize || 0) + (stats.indexSize || 0),
+      objects: stats.objects || 0,
+      collections: stats.collections || 0,
+      cap,
+      perCollection,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -739,17 +810,27 @@ app.put('/api/config', authenticate, teacherOnly, async (req, res) => {
 // ===========================
 mongoose.connection.once('open', async () => {
   try {
-    // 1) Convert legacy string subjects to {name, monthlyFee} in Config
     const cfg = await Config.findOne();
-    if (cfg && Array.isArray(cfg.subjects) && cfg.subjects.length) {
-      const needs = cfg.subjects.some(s => typeof s === 'string');
-      if (needs) {
-        cfg.subjects = cfg.subjects.map(s => typeof s === 'string' ? { name: s, monthlyFee: 0 } : s);
-        await cfg.save();
-        console.log('✓ Migrated subjects to {name, monthlyFee} format');
+    if (cfg) {
+      // Flatten any legacy subjects ([String] or [{name, monthlyFee}]) to {name} only.
+      if (Array.isArray(cfg.subjects) && cfg.subjects.length) {
+        const needs = cfg.subjects.some(s => typeof s === 'string' || s?.monthlyFee !== undefined);
+        if (needs) {
+          cfg.subjects = cfg.subjects.map(s =>
+            typeof s === 'string' ? { name: s } : { name: s.name }
+          );
+        }
       }
+      // Strip removed password fields if they linger from a previous schema.
+      if (cfg.studentPassword || cfg.parentPassword) {
+        cfg.studentPassword = undefined;
+        cfg.parentPassword = undefined;
+        await Config.updateOne({ _id: cfg._id }, { $unset: { studentPassword: '', parentPassword: '' } });
+      }
+      await cfg.save();
+      console.log('✓ Config migrated (subjects flattened, legacy passwords removed)');
     }
-    // 2) Backfill parentCode for existing students
+    // Backfill parentCode for existing students.
     const missing = await Student.find({ $or: [{ parentCode: { $exists: false } }, { parentCode: '' }, { parentCode: null }] });
     for (const s of missing) {
       s.parentCode = await ensureUniqueParentCode();

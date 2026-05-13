@@ -50,6 +50,7 @@ const StudentSchema = new mongoose.Schema({
   parentName: String,
   parentPhone: String,
   aadhar: String,
+  birthday: String,
   subjects: { type: [String], default: [] },
   notes: String,
   joinDate: { type: Date, default: Date.now },
@@ -154,7 +155,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ===========================
-// PUBLIC ROUTES (no auth)
+// PUBLIC ROUTES
 // ===========================
 
 app.get('/api/public/info', async (req, res) => {
@@ -168,12 +169,12 @@ app.get('/api/public/info', async (req, res) => {
 
 app.post('/api/public/register', async (req, res) => {
   try {
-    const { name, phone, parentName, parentPhone, aadhar, subjects, notes } = req.body;
+    const { name, phone, parentName, parentPhone, aadhar, birthday, subjects, notes } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'Name and phone are required' });
     const count = await Student.countDocuments();
     const rollNumber = String(count + 1).padStart(3, '0');
     const student = new Student({
-      name, phone, parentName, parentPhone, aadhar,
+      name, phone, parentName, parentPhone, aadhar, birthday,
       subjects: subjects || [],
       notes,
       rollNumber,
@@ -286,7 +287,6 @@ app.get('/api/attendance/summary/:studentId', authenticate, async (req, res) => 
   }
 });
 
-// Student check in/out (self-marked)
 app.post('/api/attendance/check', authenticate, async (req, res) => {
   try {
     const { studentId, action } = req.body;
@@ -310,7 +310,6 @@ app.post('/api/attendance/check', authenticate, async (req, res) => {
   }
 });
 
-// Teacher marks a student manually
 app.post('/api/attendance/teacher-mark', authenticate, teacherOnly, async (req, res) => {
   try {
     const { studentId, status, reason, date } = req.body;
@@ -332,6 +331,32 @@ app.post('/api/attendance/teacher-mark', authenticate, teacherOnly, async (req, 
     }
     await attendance.save();
     res.json(attendance);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/attendance/mark-all-present', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const config = await Config.findOne();
+    const students = await Student.find();
+    let marked = 0;
+    for (const s of students) {
+      let att = await Attendance.findOne({ studentId: s._id, date: today });
+      if (att && att.status === 'present') continue;
+      if (!att) {
+        att = new Attendance({ studentId: s._id, date: today });
+      }
+      att.status = 'present';
+      att.markedBy = 'teacher';
+      att.inTime = config?.classStart || '09:00';
+      att.outTime = config?.classEnd || '17:00';
+      att.reason = '';
+      await att.save();
+      marked++;
+    }
+    res.json({ ok: true, marked });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -899,3 +899,231 @@ textarea { resize: vertical; min-height: 60px; }
   .settings-table td, .fees-table td { padding: 6px; font-size: 13px; }
   .code-big { font-size: 26px; letter-spacing: 6px; padding: 14px 12px; }
 }
+
+/* =====================================================
+   v3 ADDITIONS: storage card, student mode, fee rows, chips
+   ===================================================== */
+
+/* --- Static chips (Settings subjects) --- */
+.chip-static {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  font-size: 14px;
+  color: #0f172a;
+}
+.chip-x {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+  color: #94a3b8;
+}
+.chip-x:hover { color: #ef4444; }
+
+/* --- iOS-style storage card --- */
+.storage-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 18px;
+  margin-top: 8px;
+}
+.storage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.storage-bar {
+  display: flex;
+  width: 100%;
+  height: 22px;
+  background: #e5e5ea;
+  border-radius: 11px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+}
+.storage-seg {
+  height: 100%;
+  transition: width 0.4s ease;
+  min-width: 1px;
+}
+.storage-seg + .storage-seg {
+  box-shadow: inset 1px 0 0 rgba(255,255,255,0.5);
+}
+.storage-legend {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.storage-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+}
+.storage-legend-row:last-child { border-bottom: none; }
+.storage-free { color: #6b7280; }
+.storage-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.storage-label {
+  flex: 1;
+  text-transform: capitalize;
+}
+.storage-size {
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.storage-meta {
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* --- Student Mode (hand-to-student) --- */
+.student-mode {
+  padding: 12px 4px;
+}
+.search-big {
+  font-size: 18px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  width: 100%;
+  margin: 12px 0;
+}
+.student-mode-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+.student-mode-tile {
+  background: #ffffff;
+  border: 2px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 18px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.15s;
+}
+.student-mode-tile:hover, .student-mode-tile:active {
+  border-color: #0a84ff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(10,132,255,0.12);
+}
+.student-mode-tile strong {
+  font-size: 17px;
+  color: #0f172a;
+}
+.picked-card {
+  background: #f0f9ff;
+  border: 2px solid #0a84ff;
+  border-radius: 16px;
+  padding: 28px;
+  text-align: center;
+  margin-top: 16px;
+}
+.picked-name {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+.student-mode-done {
+  text-align: center;
+  padding: 40px 20px;
+}
+.big-check {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: #30d158;
+  color: #ffffff;
+  font-size: 48px;
+  line-height: 88px;
+  margin: 0 auto 16px;
+  font-weight: 700;
+}
+.student-mode-done h2 {
+  margin: 0 0 8px;
+  font-size: 26px;
+}
+
+/* --- Fee row (replaces old fees-table cards) --- */
+.fee-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.fee-row-left { flex: 1; min-width: 200px; }
+.fee-row-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 6px;
+}
+.fee-row-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fee-pill {
+  display: inline-block;
+  padding: 3px 9px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #475569;
+}
+.fee-pill-class {
+  background: #dbeafe;
+  color: #1e40af;
+  font-weight: 600;
+}
+.fee-row-amount { text-align: right; }
+.fee-row-month {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.fee-row-day {
+  font-size: 13px;
+  color: #6b7280;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mobile tweaks */
+@media (max-width: 480px) {
+  .fee-row { padding: 14px; }
+  .fee-row-month { font-size: 18px; }
+  .student-mode-list { grid-template-columns: 1fr 1fr; }
+}

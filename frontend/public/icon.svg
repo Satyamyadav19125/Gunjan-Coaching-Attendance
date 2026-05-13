@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a84ff"/>
+      <stop offset="1" stop-color="#0a5fff"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e5e7eb"/>
+    </linearGradient>
+  </defs>
+  <!-- Background squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Graduation cap, centered, slightly upper -->
+  <g transform="translate(256 230)">
+    <!-- Mortarboard top -->
+    <polygon points="-130,0 0,-65 130,0 0,65" fill="url(#cap)"/>
+    <!-- Cap base -->
+    <path d="M -70 22 L -70 70 Q 0 105 70 70 L 70 22 L 0 56 Z" fill="#ffffff" opacity="0.95"/>
+    <!-- Tassel -->
+    <circle cx="115" cy="0" r="6" fill="#ffd60a"/>
+    <path d="M 115 6 L 115 55 L 105 70 L 110 55 L 120 55 L 115 70" stroke="#ffd60a" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <!-- Checkmark badge bottom-right -->
+  <g transform="translate(370 370)">
+    <circle r="68" fill="#30d158"/>
+    <path d="M -28 0 L -8 22 L 30 -22" stroke="#ffffff" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

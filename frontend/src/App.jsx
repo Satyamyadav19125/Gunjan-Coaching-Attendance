@@ -74,10 +74,12 @@ const formatDate = (iso) => {
 const formatRupee = (n) => '₹' + (Math.round((n || 0) * 100) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 const getSubjectName = (s) => typeof s === 'string' ? s : s?.name;
-const getSubjectFee  = (s) => typeof s === 'string' ? 0 : (Number(s?.monthlyFee) || 0);
 
 // Find a batch object from its id within an info.batches array
 const findBatch = (info, batchId) => (info?.batches || []).find(b => String(b._id) === String(batchId));
+
+// Find a class object by name (classes are keyed by name)
+const findClass = (info, name) => (info?.classes || []).find(c => c.name === name);
 
 // ============================
 // MAIN APP
@@ -86,7 +88,6 @@ export default function App() {
   const [view, setView] = useState('landing');
   const [info, setInfo] = useState({});
   const [role, setRole] = useState(localStorage.getItem('role'));
-  const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(
     JSON.parse(localStorage.getItem('selectedStudent') || 'null')
   );
@@ -113,8 +114,9 @@ export default function App() {
     const savedRole = localStorage.getItem('role');
     const savedStudent = JSON.parse(localStorage.getItem('selectedStudent') || 'null');
     if (savedRole === 'teacher') setView('teacher');
-    else if (savedRole === 'student' && savedStudent) setView('student');
     else if (savedRole === 'parent' && savedStudent) setView('parent');
+    // legacy 'student' role: clear it; that flow no longer exists
+    else if (savedRole === 'student') { localStorage.clear(); }
   }, [refreshInfo]);
 
   useEffect(() => {
@@ -133,10 +135,9 @@ export default function App() {
 
   if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} onParentLogin={() => setView('parent-login')} />;
   if (view === 'register') return <Register info={info} onBack={() => setView('landing')} onDone={() => setView('login')} />;
-  if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(r, s) => {
+  if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(r) => {
     setRole(r); refreshInfo();
-    if (r === 'teacher') setView('teacher');
-    else { setStudents(s); setView('pick-student'); }
+    setView('teacher');
   }} />;
   if (view === 'parent-login') return <ParentLogin info={info} onBack={() => setView('landing')} onLogin={(student) => {
     setRole('parent'); setSelectedStudent(student);
@@ -144,13 +145,7 @@ export default function App() {
     refreshInfo();
     setView('parent');
   }} />;
-  if (view === 'pick-student') return <PickStudent students={students} role={role} onPick={(s) => {
-    setSelectedStudent(s);
-    localStorage.setItem('selectedStudent', JSON.stringify(s));
-    setView('student');
-  }} onBack={handleSignOut} />;
   if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} refreshInfo={refreshInfo} />;
-  if (view === 'student') return <StudentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
   if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
   return null;
 }
@@ -196,7 +191,7 @@ function Landing({ info, onSignIn, onRegister, onParentLogin }) {
         <p>Students check in with one tap. Parents see real-time updates. Teachers manage everything from one dashboard.</p>
         <div className="hero-buttons">
           <button className="btn btn-primary btn-lg" onClick={onSignIn}>
-            <LogIn size={18} /> Sign In (Teacher / Student)
+            <LogIn size={18} /> Teacher Sign In
           </button>
           <button className="btn btn-secondary btn-lg" onClick={onParentLogin}>
             <KeyRound size={18} /> Parent Login with Code
@@ -213,17 +208,17 @@ function Landing({ info, onSignIn, onRegister, onParentLogin }) {
           <div className="card">
             <CheckCircle size={32} color="#16a34a" />
             <h3>Students Check In</h3>
-            <p>One tap to mark arrival. Made a mistake? Undo within minutes. Check-in / check-out times use IST automatically.</p>
+            <p>The teacher hands the device over and the student taps their own name. No password to remember, no way to mark yourself absent.</p>
           </div>
           <div className="card">
             <BarChart3 size={32} color="#d97706" />
             <h3>Parents Track Progress</h3>
-            <p>Each parent gets a unique code and sees only their own child's data — no list of other students.</p>
+            <p>Each parent gets a unique code and sees only their own child's data. Stay logged in until you tap log out.</p>
           </div>
           <div className="card">
             <Settings size={32} color="#dc2626" />
             <h3>Teacher Controls Everything</h3>
-            <p>Batches, subjects with fees, holidays, announcements, WhatsApp sharing — all in one place.</p>
+            <p>Classes with their own monthly fees, batches with their own timings, holidays, announcements, WhatsApp sharing — all in one place.</p>
           </div>
         </div>
       </section>
@@ -250,7 +245,7 @@ function Landing({ info, onSignIn, onRegister, onParentLogin }) {
 }
 
 // ============================
-// LOGIN (teacher / student)
+// LOGIN (teacher only — parents use code, students use teacher's device)
 // ============================
 function Login({ info, onBack, onLogin }) {
   const [password, setPassword] = useState('');
@@ -265,7 +260,7 @@ function Login({ info, onBack, onLogin }) {
       const res = await api.post('/auth/login', { password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('role', res.data.role);
-      onLogin(res.data.role, res.data.students || []);
+      onLogin(res.data.role, []);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
     } finally { setLoading(false); }
@@ -278,23 +273,22 @@ function Login({ info, onBack, onLogin }) {
         <div className="auth-grid">
           <div>
             <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
-            <p className="muted">Teacher and students sign in with a password.</p>
+            <p className="muted">Teacher sign-in.</p>
             <div className="role-card role-teacher">
-              <h3>🎓 Teacher?</h3>
+              <h3>🎓 Teacher</h3>
               <p>Use your teacher password to manage everything.</p>
-            </div>
-            <div className="role-card role-student">
-              <h3>📚 Student?</h3>
-              <p>Use the student password your teacher gave you.</p>
             </div>
             <div className="role-card role-parent">
               <h3>👨‍👩‍👧 Parent?</h3>
-              <p>Parents now log in with a <strong>unique code</strong> given by the teacher. <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Go back</a> and tap "Parent Login with Code".</p>
+              <p>Parents log in with a <strong>unique code</strong> from the teacher. <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Go back</a> and tap "Parent Login with Code".</p>
+            </div>
+            <div className="role-card role-student">
+              <h3>📚 Student?</h3>
+              <p>Students mark themselves present on the teacher's device — no login needed.</p>
             </div>
           </div>
           <div className="auth-form">
-            <h2 className="display">Sign In</h2>
-            <p className="muted">Enter teacher or student password</p>
+            <h2 className="display">Teacher Sign In</h2>
             <form onSubmit={submit}>
               <label>PASSWORD</label>
               <div className="password-field">
@@ -314,11 +308,6 @@ function Login({ info, onBack, onLogin }) {
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
             </form>
-            <hr />
-            <p className="text-center">
-              <strong>No password yet?</strong><br />
-              Ask your teacher for the password.
-            </p>
           </div>
         </div>
       </div>
@@ -586,7 +575,83 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
 }
 
 // ============================
-// TODAY TAB — with "Unmark" undo (feature #9)
+// STUDENT MODE PICKER — student picks themselves on teacher's device
+// ============================
+function StudentModePicker({ students, todayAtt, onCancel, onMarked }) {
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const markedIds = new Set(todayAtt.map(a => String(a.studentId)));
+  const available = students.filter(s => !markedIds.has(String(s._id)));
+  const filtered = available.filter(s =>
+    s.name.toLowerCase().includes(q.toLowerCase()) ||
+    (s.rollNumber || '').includes(q)
+  );
+
+  const confirm = async () => {
+    if (!picked) return;
+    setSubmitting(true);
+    try {
+      // Student-side check-in (markedBy = 'self')
+      await api.post('/attendance/self-mark', { studentId: picked._id });
+      onMarked(picked.name);
+    } catch (err) {
+      alert('Could not mark: ' + (err.response?.data?.error || err.message));
+      setSubmitting(false);
+    }
+  };
+
+  if (picked) {
+    return (
+      <div className="student-mode">
+        <h2 className="display">Is this you?</h2>
+        <div className="picked-card">
+          <div className="picked-name">{picked.name}</div>
+          <div className="muted">Roll #{picked.rollNumber}</div>
+        </div>
+        <div className="row" style={{ gap: 12, marginTop: 24 }}>
+          <button className="btn btn-outline btn-lg" onClick={() => setPicked(null)} disabled={submitting}>Not me</button>
+          <button className="btn btn-primary btn-lg" onClick={confirm} disabled={submitting}>
+            {submitting ? 'Marking...' : 'Yes, mark me present'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="student-mode">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h2 className="display">Tap your name</h2>
+        <button className="btn-link" onClick={onCancel}><ArrowLeft size={14} /> Hand back to teacher</button>
+      </div>
+      <input
+        className="search-big"
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Search by name or roll number..."
+        autoFocus
+      />
+      {available.length === 0 ? (
+        <p className="muted">Everyone has been marked today. ✨</p>
+      ) : (
+        <div className="student-mode-list">
+          {filtered.map(s => (
+            <button key={s._id} className="student-mode-tile" onClick={() => setPicked(s)}>
+              <strong>{s.name}</strong>
+              <span className="muted small">Roll #{s.rollNumber}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="muted">No matches.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================
+// TODAY TAB — with "Unmark" undo (feature #9) + Student Mode (feature: hand-to-student)
 // ============================
 function TodayTab({ info, announcements }) {
   const [students, setStudents] = useState([]);
@@ -596,6 +661,8 @@ function TodayTab({ info, announcements }) {
   const [reason, setReason] = useState('');
   const [bulkLoading, setBulkLoading] = useState(false);
   const [batchFilter, setBatchFilter] = useState('');
+  const [studentMode, setStudentMode] = useState(false);
+  const [studentModeDone, setStudentModeDone] = useState(null); // name of who just marked, for confirmation
 
   const load = async () => {
     setLoading(true);
@@ -651,6 +718,31 @@ function TodayTab({ info, announcements }) {
 
   if (loading) return <p className="muted">Loading...</p>;
 
+  // STUDENT MODE — teacher hands the device over.
+  if (studentModeDone) {
+    return (
+      <div className="student-mode-done">
+        <div className="big-check">✓</div>
+        <h2>Marked Present</h2>
+        <p className="muted">{studentModeDone}, you're checked in for today.</p>
+        <p className="small muted">Please hand the device back to the teacher.</p>
+        <button className="btn btn-primary btn-lg" onClick={() => { setStudentModeDone(null); setStudentMode(false); load(); }}>
+          Back to Teacher
+        </button>
+      </div>
+    );
+  }
+  if (studentMode) {
+    return (
+      <StudentModePicker
+        students={students}
+        todayAtt={todayAtt}
+        onCancel={() => setStudentMode(false)}
+        onMarked={(name) => setStudentModeDone(name)}
+      />
+    );
+  }
+
   const visible = batchFilter ? students.filter(s => s.batchId === batchFilter) : students;
   const birthdayStudents = visible.filter(s => isBirthdayToday(s.birthday));
   const offDay = isOffDayToday(announcements);
@@ -697,6 +789,9 @@ function TodayTab({ info, announcements }) {
             <CheckCircle size={16} /> {bulkLoading ? 'Marking...' : (batchFilter ? 'Mark Batch Present' : 'Mark Everyone Present')}
           </button>
         )}
+        <button className="btn btn-outline" onClick={() => setStudentMode(true)} title="Let a student mark themselves on this device">
+          <User size={16} /> Hand to Student
+        </button>
       </div>
 
       <div className="list">
@@ -926,7 +1021,7 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
 
   const [form, setForm] = useState(student || {
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', birthday: '', subjects: [], notes: '', batchId: ''
+    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: ''
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -975,7 +1070,20 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
       <label>Aadhar (12 digits)</label>
       <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value})} maxLength={12} />
 
-      {/* Feature #4: assign student to a batch */}
+      {/* Class - determines monthly fee */}
+      <label>Class</label>
+      {(info.classes?.length || 0) === 0 ? (
+        <p className="small muted">No classes yet — add some in Settings → Classes.</p>
+      ) : (
+        <select value={form.className || ''} onChange={e => setForm({ ...form, className: e.target.value })}>
+          <option value="">— No class —</option>
+          {info.classes.map(c => (
+            <option key={c.name} value={c.name}>{c.name} (₹{(c.monthlyFee || 0).toLocaleString('en-IN')}/month)</option>
+          ))}
+        </select>
+      )}
+
+      {/* Batch */}
       <label>Batch</label>
       {(info.batches?.length || 0) === 0 ? (
         <p className="small muted">No batches yet — add some in Settings → Batches.</p>
@@ -1234,6 +1342,7 @@ function FeesTab({ info }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [batchFilter, setBatchFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -1249,17 +1358,19 @@ function FeesTab({ info }) {
   if (loading) return <p className="muted">Loading fees…</p>;
   if (!data) return <p className="muted">No data.</p>;
 
-  const rows = batchFilter ? data.students.filter(s => s.batchId === batchFilter) : data.students;
-  const monthlyTotal = rows.reduce((a, r) => a + (r.fees?.monthlyTotal || 0), 0);
-  const dailyTotal   = rows.reduce((a, r) => a + (r.fees?.perDayTotal   || 0), 0);
+  let rows = data.students;
+  if (batchFilter) rows = rows.filter(s => s.batchId === batchFilter);
+  if (classFilter) rows = rows.filter(s => s.className === classFilter);
 
-  // chart per batch (sum of monthly fees)
+  const monthlyTotal = rows.reduce((a, r) => a + (r.fees?.monthlyFee || 0), 0);
+  const dailyTotal   = rows.reduce((a, r) => a + (r.fees?.perDay     || 0), 0);
+
+  // Group by class for the chart (cleaner than by batch now that fees attach to class).
   const groups = {};
   rows.forEach(r => {
-    const key = r.batchId || '__none__';
-    const b = findBatch(info, r.batchId);
-    if (!groups[key]) groups[key] = { name: r.batchId ? (b?.name || 'Batch') : 'No batch', value: 0, count: 0 };
-    groups[key].value += r.fees?.monthlyTotal || 0;
+    const key = r.className || '__none__';
+    if (!groups[key]) groups[key] = { name: r.className || 'No class', value: 0, count: 0 };
+    groups[key].value += r.fees?.monthlyFee || 0;
     groups[key].count += 1;
   });
 
@@ -1270,6 +1381,12 @@ function FeesTab({ info }) {
           <label style={{ margin: 0 }}>Month:</label>
           <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="sort-select" />
         </div>
+        {(info.classes?.length || 0) > 0 && (
+          <select className="sort-select" value={classFilter} onChange={e => setClassFilter(e.target.value)}>
+            <option value="">All classes</option>
+            {info.classes.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        )}
         {(info.batches?.length || 0) > 0 && (
           <select className="sort-select" value={batchFilter} onChange={e => setBatchFilter(e.target.value)}>
             <option value="">All batches</option>
@@ -1280,62 +1397,45 @@ function FeesTab({ info }) {
 
       <div className="summary-stats">
         <div className="stat-big green"><strong>{formatRupee(monthlyTotal)}</strong><span>Total / month</span></div>
-        <div className="stat-big blue"><strong>{formatRupee(dailyTotal)}</strong><span>Total / working day</span></div>
+        <div className="stat-big blue"><strong>{formatRupee(Math.round(dailyTotal))}</strong><span>Total / working day</span></div>
         <div className="stat-big"><strong>{rows.length}</strong><span>Students</span></div>
       </div>
 
-      <div className="chart-card">
-        <h3><BarChart3 size={18} /> Monthly fees by batch</h3>
-        <BatchChart groups={Object.values(groups).map(g => ({ name: g.name, value: Math.round(g.value), count: g.count }))} />
-      </div>
+      {Object.keys(groups).length > 0 && (
+        <div className="chart-card">
+          <h3><BarChart3 size={18} /> Monthly fees by class</h3>
+          <BatchChart groups={Object.values(groups).map(g => ({ name: g.name, value: Math.round(g.value), count: g.count }))} />
+        </div>
+      )}
 
       <h3 style={{ marginTop: 16 }}>Per-student breakdown</h3>
       <div className="list">
         {rows.length === 0 && <p className="muted">No students for this filter.</p>}
         {rows.map(r => {
           const batch = findBatch(info, r.batchId);
+          const f = r.fees || {};
           return (
-            <div key={r._id} className="fee-card">
-              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                <div>
-                  <strong>{r.name}</strong>
-                  <p className="muted small">
-                    Roll #{r.rollNumber}{batch ? ` · ${batch.name}` : ''}
-                    {r.fees ? ` · ${r.fees.workingDays}/${r.fees.totalDays} working days` : ''}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <div><strong>{formatRupee(r.fees?.monthlyTotal || 0)}</strong> / month</div>
-                  <div className="small muted">{formatRupee(r.fees?.perDayTotal || 0)} per day</div>
+            <div key={r._id} className="fee-row">
+              <div className="fee-row-left">
+                <div className="fee-row-name">{r.name}</div>
+                <div className="fee-row-meta">
+                  <span className="fee-pill">Roll #{r.rollNumber}</span>
+                  {r.className && <span className="fee-pill fee-pill-class">{r.className}</span>}
+                  {batch && <span className="fee-pill">{batch.name}</span>}
+                  <span className="fee-pill">{f.workingDays || 0}/{f.totalDays || 0} working days</span>
                 </div>
               </div>
-              {(r.fees?.subjects || []).length > 0 && (
-                <table className="fees-table">
-                  <thead>
-                    <tr>
-                      <th>Subject</th>
-                      <th className="text-right">Monthly</th>
-                      <th className="text-right">Per day</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.fees.subjects.map(s => (
-                      <tr key={s.name}>
-                        <td>{s.name}</td>
-                        <td className="text-right">{formatRupee(s.monthlyFee)}</td>
-                        <td className="text-right">{formatRupee(s.perDay)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              <div className="fee-row-amount">
+                <div className="fee-row-month">{formatRupee(f.monthlyFee || 0)}</div>
+                <div className="fee-row-day">{formatRupee(Math.round(f.perDay || 0))}/day</div>
+              </div>
             </div>
           );
         })}
       </div>
 
       <p className="small muted" style={{ marginTop: 12 }}>
-        <Info size={12} /> Working days = total days in the month minus the batch's weekly off days (default: Sunday). Announced holidays do <strong>not</strong> reduce the working-day count.
+        <Info size={12} /> Per-day = monthly fee ÷ working days. Working days = total days minus weekly off (Sunday by default). Announced holidays do <strong>not</strong> reduce the working-day count.
       </p>
     </div>
   );
@@ -1509,24 +1609,25 @@ function AnnouncementsTab({ info }) {
 }
 
 // ============================
-// SETTINGS TAB — subjects with fees, batches, refreshInfo (features #4, #5, #6, #12)
+// SETTINGS TAB — subjects (names only), classes (with fees), batches, teacher password, storage
 // ============================
 function SettingsTab({ info, refreshInfo }) {
   const [form, setForm] = useState(info);
   const [subjectName, setSubjectName] = useState('');
-  const [subjectFee, setSubjectFee] = useState('');
+  const [className, setClassName] = useState('');
+  const [classFee, setClassFee] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPwd, setShowPwd] = useState(false);
-  const [pwds, setPwds] = useState({ teacherPassword: '', studentPassword: '', parentPassword: '' });
+  const [newPassword, setNewPassword] = useState('');
 
-  // Whenever the parent re-fetches info, reset the form to that. We also normalize
-  // subjects to the {name, monthlyFee} format so the UI stays consistent.
+  // Normalize anything coming from the server into the shapes the UI expects.
   useEffect(() => {
     setForm({
       ...info,
-      subjects: (info.subjects || []).map(s => typeof s === 'string' ? { name: s, monthlyFee: 0 } : { name: s.name, monthlyFee: Number(s.monthlyFee) || 0 }),
-      batches: (info.batches || []).map(b => ({ ...b })),
+      subjects: (info.subjects || []).map(s => ({ name: typeof s === 'string' ? s : s.name })),
+      classes:  (info.classes  || []).map(c => ({ ...c, monthlyFee: Number(c.monthlyFee) || 0 })),
+      batches:  (info.batches  || []).map(b => ({ ...b })),
     });
   }, [info]);
 
@@ -1535,69 +1636,76 @@ function SettingsTab({ info, refreshInfo }) {
     try {
       const body = {
         ...form,
-        subjects: (form.subjects || []).map(s => ({ name: (s.name || '').trim(), monthlyFee: Number(s.monthlyFee) || 0 })).filter(s => s.name),
+        subjects: (form.subjects || []).map(s => ({ name: (s.name || '').trim() })).filter(s => s.name),
+        classes:  (form.classes  || []).map(c => ({
+          _id: c._id, name: (c.name || '').trim(), monthlyFee: Number(c.monthlyFee) || 0,
+        })).filter(c => c.name),
         batches:  (form.batches  || []).map(b => ({
           _id: b._id, name: (b.name || '').trim(),
           startTime: b.startTime || '09:00', endTime: b.endTime || '11:00',
           weeklyOffDays: (b.weeklyOffDays && b.weeklyOffDays.length) ? b.weeklyOffDays : [0]
         })).filter(b => b.name),
       };
-      if (showPwd) {
-        if (pwds.teacherPassword) body.teacherPassword = pwds.teacherPassword;
-        if (pwds.studentPassword) body.studentPassword = pwds.studentPassword;
-        if (pwds.parentPassword)  body.parentPassword  = pwds.parentPassword;
-      }
+      if (showPwd && newPassword) body.teacherPassword = newPassword;
       await api.put('/config', body);
-      // Feature #5 + #12: refresh global info so the Add Student form sees new subjects immediately.
       if (refreshInfo) await refreshInfo();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-      setPwds({ teacherPassword: '', studentPassword: '', parentPassword: '' });
+      setNewPassword('');
       setShowPwd(false);
     } catch (err) {
       alert('Failed: ' + (err.response?.data?.error || err.message));
     } finally { setSaving(false); }
   };
 
-  // -- Subjects with fees (#6) ----------------------------------------------
+  // -- Subjects (names only, no fees) ----------------------------------------
   const addSubject = () => {
     const name = subjectName.trim();
     if (!name) return;
-    const fee = Number(subjectFee) || 0;
     setForm(f => {
-      const existing = (f.subjects || []).some(s => s.name.toLowerCase() === name.toLowerCase());
-      if (existing) return f;
-      return { ...f, subjects: [...(f.subjects || []), { name, monthlyFee: fee }] };
+      if ((f.subjects || []).some(s => s.name.toLowerCase() === name.toLowerCase())) return f;
+      return { ...f, subjects: [...(f.subjects || []), { name }] };
     });
-    setSubjectName(''); setSubjectFee('');
+    setSubjectName('');
   };
-
-  const updateSubjectFee = (name, fee) => {
-    setForm(f => ({
-      ...f,
-      subjects: (f.subjects || []).map(s => s.name === name ? { ...s, monthlyFee: Number(fee) || 0 } : s)
-    }));
-  };
-
   const removeSubject = (name) => {
     setForm(f => ({ ...f, subjects: (f.subjects || []).filter(s => s.name !== name) }));
   };
 
-  // -- Batches (#4) ----------------------------------------------------------
+  // -- Classes (with monthly fee) --------------------------------------------
+  const addClass = () => {
+    const name = className.trim();
+    if (!name) return;
+    const fee = Number(classFee) || 0;
+    setForm(f => {
+      if ((f.classes || []).some(c => c.name.toLowerCase() === name.toLowerCase())) return f;
+      return { ...f, classes: [...(f.classes || []), { name, monthlyFee: fee }] };
+    });
+    setClassName(''); setClassFee('');
+  };
+  const updateClassFee = (name, fee) => {
+    setForm(f => ({
+      ...f,
+      classes: (f.classes || []).map(c => c.name === name ? { ...c, monthlyFee: Number(fee) || 0 } : c)
+    }));
+  };
+  const removeClass = (name) => {
+    setForm(f => ({ ...f, classes: (f.classes || []).filter(c => c.name !== name) }));
+  };
+
+  // -- Batches ---------------------------------------------------------------
   const addBatch = () => {
     setForm(f => ({
       ...f,
       batches: [...(f.batches || []), { name: 'New Batch', startTime: '09:00', endTime: '11:00', weeklyOffDays: [0] }]
     }));
   };
-
   const updateBatch = (idx, patch) => {
     setForm(f => ({
       ...f,
       batches: (f.batches || []).map((b, i) => i === idx ? { ...b, ...patch } : b)
     }));
   };
-
   const toggleBatchOffDay = (idx, dow) => {
     setForm(f => ({
       ...f,
@@ -1608,7 +1716,6 @@ function SettingsTab({ info, refreshInfo }) {
       })
     }));
   };
-
   const removeBatch = (idx) => {
     if (!confirm('Remove this batch? Students assigned to it will become unassigned.')) return;
     setForm(f => ({ ...f, batches: (f.batches || []).filter((_, i) => i !== idx) }));
@@ -1635,8 +1742,38 @@ function SettingsTab({ info, refreshInfo }) {
       <input type="time" value={form.classEnd || ''} onChange={e => setForm({...form, classEnd: e.target.value})} />
 
       <hr />
+      <h3><GraduationCap size={16} /> Classes & Monthly Fees</h3>
+      <p className="small muted">A student's monthly fee comes from the class they belong to. Per-day fee is auto-calculated from working days.</p>
+      <table className="settings-table">
+        <thead>
+          <tr><th>Class</th><th>Monthly Fee (₹)</th><th></th></tr>
+        </thead>
+        <tbody>
+          {(form.classes || []).length === 0 && (
+            <tr><td colSpan={3} className="muted small">No classes yet. Add one below.</td></tr>
+          )}
+          {(form.classes || []).map(c => (
+            <tr key={c.name}>
+              <td>{c.name}</td>
+              <td>
+                <input type="number" min="0" value={c.monthlyFee} onChange={e => updateClassFee(c.name, e.target.value)} style={{ maxWidth: 140 }} />
+              </td>
+              <td className="text-right">
+                <button className="icon-btn icon-btn-danger" onClick={() => removeClass(c.name)}><Trash2 size={14} /></button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row" style={{ marginTop: 8 }}>
+        <input value={className} onChange={e => setClassName(e.target.value)} placeholder="e.g. 8th Standard" />
+        <input type="number" min="0" value={classFee} onChange={e => setClassFee(e.target.value)} placeholder="Monthly fee (₹)" style={{ maxWidth: 180 }} />
+        <button className="btn btn-outline" onClick={addClass}><Plus size={14} /> Add class</button>
+      </div>
+
+      <hr />
       <h3><Layers size={16} /> Batches (each can have its own timing & off-days)</h3>
-      <p className="small muted">Add as many batches as you like. Default off-day is Sunday only.</p>
+      <p className="small muted">Default off-day is Sunday only.</p>
       <div className="batch-list">
         {(form.batches || []).map((b, i) => (
           <div key={b._id || i} className="batch-card">
@@ -1674,54 +1811,112 @@ function SettingsTab({ info, refreshInfo }) {
       <button className="btn btn-outline" onClick={addBatch}><Plus size={14} /> Add batch</button>
 
       <hr />
-      <h3><BookOpen size={16} /> Subjects & Monthly Fees</h3>
-      <p className="small muted">Add subjects taught here. The fee is per student per month for that subject. Per-day fee is calculated automatically from working days.</p>
-      <table className="settings-table">
-        <thead>
-          <tr><th>Subject</th><th>Monthly Fee (₹)</th><th></th></tr>
-        </thead>
-        <tbody>
-          {(form.subjects || []).length === 0 && (
-            <tr><td colSpan={3} className="muted small">No subjects yet.</td></tr>
-          )}
-          {(form.subjects || []).map(s => (
-            <tr key={s.name}>
-              <td>{s.name}</td>
-              <td>
-                <input type="number" min="0" value={s.monthlyFee} onChange={e => updateSubjectFee(s.name, e.target.value)} style={{ maxWidth: 140 }} />
-              </td>
-              <td className="text-right">
-                <button className="icon-btn icon-btn-danger" onClick={() => removeSubject(s.name)}><Trash2 size={14} /></button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="row" style={{ marginTop: 8 }}>
-        <input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="New subject name" />
-        <input type="number" min="0" value={subjectFee} onChange={e => setSubjectFee(e.target.value)} placeholder="Monthly fee (₹)" style={{ maxWidth: 180 }} />
+      <h3><BookOpen size={16} /> Subjects</h3>
+      <p className="small muted">Just for organization — subjects don't carry fees.</p>
+      <div className="chip-group" style={{ marginBottom: 10 }}>
+        {(form.subjects || []).map(s => (
+          <span key={s.name} className="chip-static">
+            {s.name}
+            <button className="chip-x" onClick={() => removeSubject(s.name)} aria-label={`Remove ${s.name}`}>×</button>
+          </span>
+        ))}
+        {(form.subjects || []).length === 0 && <span className="small muted">No subjects yet.</span>}
+      </div>
+      <div className="row">
+        <input value={subjectName} onChange={e => setSubjectName(e.target.value)} placeholder="New subject name" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubject(); } }} />
         <button className="btn btn-outline" onClick={addSubject}><Plus size={14} /> Add</button>
       </div>
 
       <hr />
-
       <div className="row">
-        <h3>Change Passwords</h3>
-        <button className="btn-link" onClick={() => setShowPwd(!showPwd)}>{showPwd ? 'Cancel' : 'Change passwords'}</button>
+        <h3>Teacher Password</h3>
+        <button className="btn-link" onClick={() => setShowPwd(!showPwd)}>{showPwd ? 'Cancel' : 'Change'}</button>
       </div>
+      <p className="small muted">Parents log in with their unique 6-character code (from the Students tab). Students mark themselves on your device — no password needed.</p>
       {showPwd && (
         <>
           <label>New Teacher Password</label>
-          <input type="text" value={pwds.teacherPassword} onChange={e => setPwds({...pwds, teacherPassword: e.target.value})} placeholder="Leave blank to keep current" />
-          <label>New Student Password</label>
-          <input type="text" value={pwds.studentPassword} onChange={e => setPwds({...pwds, studentPassword: e.target.value})} placeholder="Leave blank to keep current" />
-          <p className="small muted">Note: parents log in with a per-student code now, not a password.</p>
+          <input type="text" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Leave blank to keep current" />
         </>
       )}
 
       <button className="btn btn-primary btn-block" onClick={save} disabled={saving}>
         <Save size={14} /> {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Settings'}
       </button>
+
+      <hr />
+      <StorageCard />
+    </div>
+  );
+}
+
+// ============================
+// STORAGE CARD — iOS-style MongoDB Atlas usage bar
+// ============================
+function StorageCard() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    api.get('/storage').then(r => setData(r.data)).catch(e => setErr(e.response?.data?.error || e.message));
+  }, []);
+
+  if (err) return <div className="card small muted">Storage info unavailable: {err}</div>;
+  if (!data) return <div className="card small muted">Loading storage…</div>;
+
+  const formatBytes = (b) => {
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
+    return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  };
+
+  const cap = data.cap || (512 * 1024 * 1024);
+  const used = data.totalUsed || (data.dataSize + data.indexSize);
+  const free = Math.max(0, cap - used);
+  const pct = (n) => Math.max(0, Math.min(100, (n / cap) * 100));
+
+  // Colours match the iOS-storage screen vibe.
+  const palette = ['#0a84ff', '#30d158', '#ff9f0a', '#bf5af2', '#ff453a', '#5e5ce6', '#64d2ff'];
+
+  // Build segments per collection (data portion), then a single indexes segment.
+  const segments = [];
+  (data.perCollection || []).forEach((c, i) => {
+    if (c.size > 0) segments.push({ label: c.name, size: c.size, color: palette[i % palette.length] });
+  });
+  if (data.indexSize > 0) segments.push({ label: 'Indexes', size: data.indexSize, color: '#8e8e93' });
+
+  return (
+    <div className="storage-card">
+      <div className="storage-header">
+        <h3 style={{ margin: 0 }}>Database Storage</h3>
+        <div className="small muted">{formatBytes(used)} of {formatBytes(cap)} used</div>
+      </div>
+
+      <div className="storage-bar" role="img" aria-label={`${formatBytes(used)} of ${formatBytes(cap)} used`}>
+        {segments.map((s, i) => (
+          <div key={i} className="storage-seg" style={{ width: `${pct(s.size)}%`, background: s.color }} title={`${s.label}: ${formatBytes(s.size)}`} />
+        ))}
+      </div>
+
+      <div className="storage-legend">
+        {segments.map((s, i) => (
+          <div key={i} className="storage-legend-row">
+            <span className="storage-dot" style={{ background: s.color }} />
+            <span className="storage-label">{s.label}</span>
+            <span className="storage-size">{formatBytes(s.size)}</span>
+          </div>
+        ))}
+        <div className="storage-legend-row storage-free">
+          <span className="storage-dot" style={{ background: '#e5e5ea', border: '1px solid #d1d1d6' }} />
+          <span className="storage-label">Free</span>
+          <span className="storage-size">{formatBytes(free)}</span>
+        </div>
+      </div>
+
+      <div className="storage-meta small muted">
+        {data.objects.toLocaleString()} documents across {data.collections} collections
+      </div>
     </div>
   );
 }
@@ -2045,24 +2240,23 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
             {!fees ? <p className="muted">Loading…</p> : (
               <>
                 <div className="summary-stats">
-                  <div className="stat-big green"><strong>{formatRupee(fees.fees?.monthlyTotal || 0)}</strong><span>This month</span></div>
-                  <div className="stat-big blue"><strong>{formatRupee(fees.fees?.perDayTotal || 0)}</strong><span>Per working day</span></div>
+                  <div className="stat-big green"><strong>{formatRupee(fees.fees?.monthlyFee || 0)}</strong><span>This month</span></div>
+                  <div className="stat-big blue"><strong>{formatRupee(Math.round(fees.fees?.perDay || 0))}</strong><span>Per working day</span></div>
                   <div className="stat-big"><strong>{fees.fees?.workingDays}/{fees.fees?.totalDays}</strong><span>Working days</span></div>
                 </div>
-                <table className="fees-table">
-                  <thead>
-                    <tr><th>Subject</th><th className="text-right">Monthly</th><th className="text-right">Per day</th></tr>
-                  </thead>
-                  <tbody>
-                    {(fees.fees?.subjects || []).map(s => (
-                      <tr key={s.name}>
-                        <td>{s.name}</td>
-                        <td className="text-right">{formatRupee(s.monthlyFee)}</td>
-                        <td className="text-right">{formatRupee(s.perDay)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="fee-row">
+                  <div className="fee-row-left">
+                    <div className="fee-row-name">{student?.name}</div>
+                    <div className="fee-row-meta">
+                      {fees.fees?.className && <span className="fee-pill fee-pill-class">{fees.fees.className}</span>}
+                      <span className="fee-pill">{fees.fees?.workingDays || 0}/{fees.fees?.totalDays || 0} working days</span>
+                    </div>
+                  </div>
+                  <div className="fee-row-amount">
+                    <div className="fee-row-month">{formatRupee(fees.fees?.monthlyFee || 0)}</div>
+                    <div className="fee-row-day">{formatRupee(Math.round(fees.fees?.perDay || 0))}/day</div>
+                  </div>
+                </div>
                 <p className="small muted" style={{ marginTop: 12 }}>
                   Per-day fee = monthly fee ÷ working days. Holidays don't reduce the working-day count.
                 </p>

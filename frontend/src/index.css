@@ -750,3 +750,152 @@ textarea { resize: vertical; min-height: 60px; }
   .attendance-status { align-items: flex-start; }
   .off-day-banner { padding: 12px 16px; }
 }
+
+/* ============================
+   v2 ADDITIONS (batches, fees, parent code, undo, charts)
+   ============================ */
+
+/* Parent code display */
+.inline-code {
+  background: #fef3e7;
+  border: 1px solid #fcd9b6;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: #9a3412;
+}
+.code-display { text-align: center; padding: 8px 0 4px; }
+.code-big {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  color: #c2410c;
+  background: #fef3e7;
+  border: 2px dashed #fcd9b6;
+  border-radius: 12px;
+  padding: 18px 16px;
+  margin: 10px 0;
+}
+.code-box {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #fef3e7;
+  border: 1px solid #fcd9b6;
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+.code-box strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 22px;
+  letter-spacing: 4px;
+  color: #c2410c;
+}
+
+/* Batches in Settings */
+.batch-list { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.batch-card {
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.batch-card .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.batch-card .row input,
+.batch-card .row select { flex: 1; min-width: 100px; }
+
+.chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: #f5f0e9;
+  border: 1px solid #e7e2da;
+  border-radius: 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #444;
+  font-family: inherit;
+}
+.chip-toggle.on {
+  background: #c2410c;
+  color: #fff;
+  border-color: #c2410c;
+}
+
+/* Settings table & fees table */
+.settings-table, .fees-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 14px;
+}
+.settings-table th, .fees-table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 2px solid #e7e2da;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+}
+.settings-table td, .fees-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0eadf;
+}
+.text-right { text-align: right; }
+
+/* Fee cards */
+.fee-card {
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Chart card */
+.chart-card {
+  background: #fff;
+  border: 1px solid #e7e2da;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 12px 0;
+}
+.chart-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+/* Stat row inline */
+.row-buttons {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* tighten label inside Add Date row */
+.modal-body .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.modal-body .row input[type="date"] { flex: 1; min-width: 140px; }
+
+@media (max-width: 640px) {
+  .settings-table th, .fees-table th,
+  .settings-table td, .fees-table td { padding: 6px; font-size: 13px; }
+  .code-big { font-size: 26px; letter-spacing: 6px; padding: 14px 12px; }
+}

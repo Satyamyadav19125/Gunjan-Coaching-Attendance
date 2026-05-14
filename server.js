@@ -153,6 +153,7 @@ const ChatMessageSchema = new mongoose.Schema({
   studentId: { type: mongoose.Schema.Types.ObjectId },
   name: { type: String, required: true },
   rollNumber: String,
+  photo: String, // sender's profile photo (base64) stored at send time
   text: { type: String, required: true },
   createdAt: { type: Date, default: Date.now, index: true },
 });
@@ -301,12 +302,12 @@ app.post('/api/auth/setup', async (req, res) => {
   }
 });
 
-// Unified login: accepts either teacher password OR parent code in a single field.
-// The server figures out which it is.
+// Unified login: teacher password → parent code → student roll number.
+// One field, the server figures out which it is.
 app.post('/api/auth/login', async (req, res) => {
   try {
     const raw = (req.body.password || '').trim();
-    if (!raw) return res.status(401).json({ error: 'Password required' });
+    if (!raw) return res.status(401).json({ error: 'Enter your password, parent code, or roll number' });
     const config = await Config.findOne();
     if (!config) return res.status(401).json({ error: 'System not set up' });
 
@@ -319,15 +320,31 @@ app.post('/api/auth/login', async (req, res) => {
       }
     }
 
-    // 2) Try as parent code (case-insensitive)
+    // 2) Try as parent code (e.g. K7842M — letter+4digits+letter)
     const code = raw.toUpperCase();
-    const student = await Student.findOne({ parentCode: code, pendingApproval: { $ne: true } });
-    if (student) {
-      const token = jwt.sign({ role: 'parent', studentId: String(student._id) }, JWT_SECRET, { expiresIn: '365d' });
-      return res.json({ token, role: 'parent', student });
+    const parentStudent = await Student.findOne({ parentCode: code, pendingApproval: { $ne: true } });
+    if (parentStudent) {
+      const token = jwt.sign({ role: 'parent', studentId: String(parentStudent._id) }, JWT_SECRET, { expiresIn: '365d' });
+      return res.json({ token, role: 'parent', student: parentStudent });
     }
 
-    return res.status(401).json({ error: 'Wrong password or code' });
+    // 3) Try as student roll number (just digits, e.g. "003" or "3")
+    if (/^\d+$/.test(raw)) {
+      const padded = raw.padStart(3, '0');
+      const rollStudent = await Student.findOne({
+        $or: [{ rollNumber: raw }, { rollNumber: padded }],
+        pendingApproval: { $ne: true }
+      });
+      if (rollStudent) {
+        const token = jwt.sign({ role: 'student', studentId: String(rollStudent._id) }, JWT_SECRET, { expiresIn: '30d' });
+        return res.json({
+          token, role: 'student',
+          student: { _id: rollStudent._id, name: rollStudent.name, rollNumber: rollStudent.rollNumber, className: rollStudent.className, photo: rollStudent.photo }
+        });
+      }
+    }
+
+    return res.status(401).json({ error: 'Wrong password, parent code, or roll number' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1080,18 +1097,20 @@ app.post('/api/chat/messages', authenticate, async (req, res) => {
     let name = 'Teacher';
     let rollNumber = '';
     let studentId = null;
+    let photo = '';
     if (req.user.role === 'student') {
-      const s = await Student.findById(req.user.studentId).select('name rollNumber');
+      const s = await Student.findById(req.user.studentId).select('name rollNumber photo');
       if (!s) return res.status(404).json({ error: 'Student not found' });
       name = s.name;
       rollNumber = s.rollNumber;
       studentId = req.user.studentId;
+      photo = s.photo || '';
     } else {
       const cfg = await Config.findOne().select('teacherName');
       name = cfg?.teacherName || 'Teacher';
     }
     const msg = new ChatMessage({
-      role: req.user.role, studentId, name, rollNumber, text,
+      role: req.user.role, studentId, name, rollNumber, photo, text,
     });
     await msg.save();
     res.json({ ok: true, message: msg });
@@ -1168,9 +1187,15 @@ const buildAIContext = async (user) => {
 
 app.post('/api/ai/chat', authenticate, async (req, res) => {
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({
+        error: 'AI_NOT_CONFIGURED',
+        message: 'To enable the AI assistant, add ANTHROPIC_API_KEY to your environment variables.\n\nOn Render: Dashboard → your service → Environment → Add Environment Variable\nKey: ANTHROPIC_API_KEY\nValue: your key from console.anthropic.com\n\nThen click "Save Changes" and wait for a redeploy.'
+      });
+    }
     const client = await initAnthropic();
     if (!client) {
-      return res.status(503).json({ error: 'AI assistant is not configured. Ask the admin to set ANTHROPIC_API_KEY on the server.' });
+      return res.status(503).json({ error: 'AI_NOT_CONFIGURED', message: 'AI assistant could not be initialized. Check your ANTHROPIC_API_KEY.' });
     }
     const userMessages = req.body.messages;
     if (!Array.isArray(userMessages) || !userMessages.length) {

@@ -1120,29 +1120,15 @@ app.post('/api/chat/messages', authenticate, async (req, res) => {
 });
 
 // ===========================
-// AI ASSISTANT (request #15) — Anthropic-powered, role-aware
+// AI ASSISTANT — Google Gemini (free, no SDK needed)
 // ===========================
-let anthropicClient = null;
-const initAnthropic = async () => {
-  if (anthropicClient) return anthropicClient;
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  try {
-    const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    return anthropicClient;
-  } catch (err) {
-    console.error('Anthropic SDK init failed:', err.message);
-    return null;
-  }
-};
 
-// Build a role-scoped data summary that goes into the system prompt.
 const buildAIContext = async (user) => {
   const cfg = await Config.findOne().select('-teacherPassword').lean();
   const lines = [];
   lines.push(`Coaching Center: ${cfg?.classroomName || 'Unknown'}`);
   if (cfg?.teacherName) lines.push(`Teacher: ${cfg.teacherName}`);
-  lines.push(`Today's date (IST): ${istDateISO()}`);
+  lines.push(`Today (IST): ${istDateISO()}`);
 
   if (user.role === 'teacher') {
     const students = await Student.find({ pendingApproval: { $ne: true } }).select('name rollNumber className batchId subjects phone parentPhone birthday').lean();
@@ -1151,19 +1137,17 @@ const buildAIContext = async (user) => {
     students.forEach(s => { const k = s.className || 'Unassigned'; byClass[k] = (byClass[k] || 0) + 1; });
     lines.push(`Total students: ${totalCount}`);
     lines.push(`By class: ${Object.entries(byClass).map(([k,v]) => `${k}: ${v}`).join(', ')}`);
-    if (cfg?.classes?.length) lines.push(`Classes & fees: ${cfg.classes.map(c => `${c.name} (₹${c.monthlyFee}/mo)`).join('; ')}`);
+    if (cfg?.classes?.length) lines.push(`Classes & fees: ${cfg.classes.map(c => `${c.name} (INR ${c.monthlyFee}/mo)`).join('; ')}`);
     if (cfg?.batches?.length) lines.push(`Batches: ${cfg.batches.map(b => `${b.name} (${b.startTime}-${b.endTime})`).join('; ')}`);
     if (cfg?.subjects?.length) lines.push(`Subjects: ${cfg.subjects.map(s => s.name).join(', ')}`);
-    // Top of mind: today's attendance
     const today = istDateISO();
     const todayAtt = await Attendance.find({ date: today }).lean();
     const present = todayAtt.filter(a => a.status === 'present').length;
     const absent  = todayAtt.filter(a => a.status === 'absent').length;
     lines.push(`Today: ${present} present, ${absent} absent, ${totalCount - todayAtt.length} not yet marked.`);
-    // Full roster (capped)
     lines.push('\nFull student roster:');
     students.slice(0, 200).forEach(s => {
-      lines.push(`- ${s.name} (Roll ${s.rollNumber}) — Class: ${s.className || '—'}, Phone: ${s.phone || '—'}, Parent: ${s.parentPhone || '—'}, DOB: ${s.birthday || '—'}`);
+      lines.push(`- ${s.name} (Roll ${s.rollNumber}) - Class: ${s.className || '-'}, Phone: ${s.phone || '-'}, Parent: ${s.parentPhone || '-'}, DOB: ${s.birthday || '-'}`);
     });
   } else if (user.role === 'parent' || user.role === 'student') {
     const s = await Student.findById(user.studentId).lean();
@@ -1171,11 +1155,10 @@ const buildAIContext = async (user) => {
     const cls = cfg?.classes?.find(c => c.name === s.className);
     const batch = cfg?.batches?.find(b => String(b._id) === String(s.batchId));
     lines.push(`\nStudent: ${s.name} (Roll ${s.rollNumber})`);
-    lines.push(`Class: ${s.className || '—'} (Monthly fee: ₹${cls?.monthlyFee || 0})`);
+    lines.push(`Class: ${s.className || '-'} (Monthly fee: INR ${cls?.monthlyFee || 0})`);
     if (batch) lines.push(`Batch: ${batch.name} (${batch.startTime}-${batch.endTime})`);
     if (s.subjects?.length) lines.push(`Subjects: ${s.subjects.join(', ')}`);
     if (s.birthday) lines.push(`Date of birth: ${s.birthday}`);
-    // Recent attendance
     const recent = await Attendance.find({ studentId: s._id }).sort({ date: -1 }).limit(14).lean();
     if (recent.length) {
       lines.push('Recent attendance:');
@@ -1187,15 +1170,9 @@ const buildAIContext = async (user) => {
 
 app.post('/api/ai/chat', authenticate, async (req, res) => {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      return res.status(503).json({
-        error: 'AI_NOT_CONFIGURED',
-        message: 'To enable the AI assistant, add ANTHROPIC_API_KEY to your environment variables.\n\nOn Render: Dashboard → your service → Environment → Add Environment Variable\nKey: ANTHROPIC_API_KEY\nValue: your key from console.anthropic.com\n\nThen click "Save Changes" and wait for a redeploy.'
-      });
-    }
-    const client = await initAnthropic();
-    if (!client) {
-      return res.status(503).json({ error: 'AI_NOT_CONFIGURED', message: 'AI assistant could not be initialized. Check your ANTHROPIC_API_KEY.' });
+    const GEMINI_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_KEY) {
+      return res.status(503).json({ error: 'AI_NOT_CONFIGURED', message: 'Add GEMINI_API_KEY to your Render environment variables.' });
     }
     const userMessages = req.body.messages;
     if (!Array.isArray(userMessages) || !userMessages.length) {
@@ -1204,39 +1181,50 @@ app.post('/api/ai/chat', authenticate, async (req, res) => {
     const context = await buildAIContext(req.user);
     const roleLabel = req.user.role === 'teacher' ? 'the teacher' : (req.user.role === 'parent' ? 'a parent' : 'a student');
     const systemPrompt = `You are the friendly AI assistant for this coaching center. You are speaking with ${roleLabel}.
-Reply in whatever language the user writes in. Be concise, warm, and accurate. If the user asks for information you don't have access to in the context below, say so honestly.
+Reply in whatever language the user writes in (Hindi, Punjabi, English). Be concise and helpful.
+Only use the data below - never invent details. For parents/students, only discuss their own information.
 
-CURRENT DATA (treat as the source of truth):
-${context}
+CURRENT DATA:
+${context}`;
 
-IMPORTANT:
-- Never invent student details, fees, or attendance records — only use what's in the context above.
-- For parents/students, you can only see and discuss their own information, never other students'.`;
-
-    // Sanitize messages: only role+content, strings only
-    const msgs = userMessages
+    const sanitized = userMessages
       .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
-      .slice(-20) // last 20 turns
-      .map(m => ({ role: m.role, content: m.content.slice(0, 4000) }));
+      .slice(-20)
+      .map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content.slice(0, 4000) }] }));
 
-    if (!msgs.length || msgs[msgs.length - 1].role !== 'user') {
+    if (!sanitized.length || sanitized[sanitized.length - 1].role !== 'user') {
       return res.status(400).json({ error: 'Last message must be from user' });
     }
 
-    const completion = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: msgs,
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
+    const body = {
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: sanitized,
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 }
+    };
+
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     });
-    const text = (completion.content || []).map(c => c.type === 'text' ? c.text : '').join('').trim();
-    res.json({ reply: text || '(no reply)' });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Gemini error:', response.status, errText);
+      return res.status(500).json({ error: 'Gemini API error: ' + response.status });
+    }
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '(no reply)';
+    res.json({ reply: text.trim() });
   } catch (err) {
     console.error('AI error:', err);
     res.status(500).json({ error: err.message || 'AI request failed' });
   }
 });
 
+// ===========================
 // ===========================
 // STORAGE STATS (MongoDB Atlas usage)
 // ===========================

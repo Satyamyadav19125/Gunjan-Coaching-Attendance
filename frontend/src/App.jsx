@@ -168,7 +168,7 @@ export default function App() {
     refreshInfo();
   };
 
-  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} onStudentLogin={() => setView('student-login')} />;
+  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} />;
   if (view === 'register') return <Register info={info} onBack={() => setView('landing')} onDone={() => setView('login')} />;
   if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(role, student) => {
     setRole(role); refreshInfo();
@@ -176,15 +176,13 @@ export default function App() {
       setSelectedStudent(student);
       localStorage.setItem('selectedStudent', JSON.stringify(student));
       setView('parent');
+    } else if (role === 'student' && student) {
+      setSelectedStudent(student);
+      localStorage.setItem('selectedStudent', JSON.stringify(student));
+      setView('student');
     } else {
       setView('teacher');
     }
-  }} />;
-  if (view === 'student-login') return <StudentLogin info={info} onBack={() => setView('landing')} onLogin={(student) => {
-    setRole('student'); setSelectedStudent(student);
-    localStorage.setItem('selectedStudent', JSON.stringify(student));
-    refreshInfo();
-    setView('student');
   }} />;
   if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} refreshInfo={refreshInfo} />;
   if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
@@ -212,7 +210,7 @@ function OffDayBanner({ announcements, batchId }) {
 // ============================
 // LANDING
 // ============================
-function Landing({ info, onSignIn, onRegister, onStudentLogin }) {
+function Landing({ info, onSignIn, onRegister }) {
   return (
     <div className="page">
       <header className="header">
@@ -220,7 +218,7 @@ function Landing({ info, onSignIn, onRegister, onStudentLogin }) {
           <GraduationCap size={28} />
           <div>
             <h1>{info.classroomName || 'Coaching Center'}</h1>
-            <p className="muted">Attendance Tracking</p>
+            <p className="muted">Attendance &amp; Management</p>
           </div>
         </div>
         <button className="btn btn-primary" onClick={onSignIn}>
@@ -229,44 +227,46 @@ function Landing({ info, onSignIn, onRegister, onStudentLogin }) {
       </header>
 
       <section className="hero">
-        <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
-        <p>One sign-in for everyone. Teachers use their password, parents use their unique code — same place.</p>
+        <div className="hero-icon-wrap">
+          <GraduationCap size={72} color="#0a84ff" />
+        </div>
+        <h1 className="display">{info.classroomName || 'Gunjan Coaching'}</h1>
+        <p className="hero-sub">Attendance · Fees · Chat — all in one place.</p>
         <div className="hero-buttons">
-          <button className="btn btn-primary btn-lg" onClick={onSignIn}>
-            <LogIn size={18} /> Sign In
+          <button className="btn btn-primary btn-xl" onClick={onSignIn}>
+            <LogIn size={20} /> Sign In
           </button>
-          <button className="btn btn-secondary btn-lg" onClick={onStudentLogin}>
-            <MessageCircle size={18} /> Student Chat (Roll Number)
-          </button>
-          <button className="btn btn-outline btn-lg" onClick={onRegister}>
-            <UserPlus size={18} /> Register as New Student
+          <button className="btn btn-outline btn-xl" onClick={onRegister}>
+            <UserPlus size={20} /> New Student? Register
           </button>
         </div>
+        <p className="small muted" style={{ marginTop: 20 }}>
+          Teacher uses their <strong>password</strong> &nbsp;·&nbsp; Parents use their <strong>code</strong> (e.g. K7842M) &nbsp;·&nbsp; Students use their <strong>roll number</strong>
+        </p>
       </section>
 
       <section className="features">
-        <h2 className="display">How It Works</h2>
         <div className="feature-grid">
           <div className="card">
-            <CheckCircle size={32} color="#16a34a" />
-            <h3>Mark Attendance</h3>
-            <p>The teacher hands the device over and the student taps their own name. Optional note when checking in.</p>
+            <CheckCircle size={28} color="#16a34a" />
+            <h3>Attendance</h3>
+            <p>Teacher hands the device to the student. They tap their name, add a note, and done.</p>
           </div>
           <div className="card">
-            <BarChart3 size={32} color="#d97706" />
-            <h3>Parents Stay Updated</h3>
-            <p>Each parent gets a unique code and sees only their own child. Stay logged in until you tap log out.</p>
+            <IndianRupee size={28} color="#d97706" />
+            <h3>Fees</h3>
+            <p>Class-based monthly fees. Per-day auto-calculated. Parents see their child's full breakdown.</p>
           </div>
           <div className="card">
-            <MessageCircle size={32} color="#9333ea" />
-            <h3>Group Chat & AI Help</h3>
-            <p>Students can chat with each other (teacher watches). Everyone gets an AI assistant that knows the data they're allowed to see.</p>
+            <MessageCircle size={28} color="#9333ea" />
+            <h3>Chat &amp; AI</h3>
+            <p>Group chat, private complaints to teacher, and a multilingual AI assistant for everyone.</p>
           </div>
         </div>
       </section>
 
       <section className="info-section">
-        <h2 className="display">About Us</h2>
+        <h2 className="display">Contact</h2>
         <div className="info-grid">
           {info.teacherName && <div className="info-row"><User size={18} /><span>{info.teacherName}</span></div>}
           {info.phone && <div className="info-row"><Phone size={18} /><a href={`tel:${info.phone}`}>{info.phone}</a></div>}
@@ -280,14 +280,15 @@ function Landing({ info, onSignIn, onRegister, onStudentLogin }) {
       </section>
 
       <footer className="footer">
-        <p>© {new Date().getFullYear()} {info.classroomName || 'Coaching Center'} · Attendance System</p>
+        <p>© {new Date().getFullYear()} {info.classroomName || 'Coaching Center'}</p>
       </footer>
     </div>
   );
 }
 
+
 // ============================
-// UNIFIED LOGIN: one field accepts teacher password OR parent code
+// UNIFIED LOGIN — teacher password / parent code / student roll number
 // ============================
 function Login({ info, onBack, onLogin }) {
   const [password, setPassword] = useState('');
@@ -302,9 +303,12 @@ function Login({ info, onBack, onLogin }) {
       const res = await api.post('/auth/login', { password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('role', res.data.role);
+      if (res.data.student) {
+        localStorage.setItem('selectedStudent', JSON.stringify(res.data.student));
+      }
       onLogin(res.data.role, res.data.student || null);
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      setError(err.response?.data?.error || 'Could not sign in');
     } finally { setLoading(false); }
   };
 
@@ -313,88 +317,44 @@ function Login({ info, onBack, onLogin }) {
       <div className="container-narrow">
         <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
         <div className="auth-form" style={{ maxWidth: 460, margin: '0 auto' }}>
-          <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
-          <p className="muted">Enter your <strong>teacher password</strong> or your <strong>parent code</strong>. Same field, the system figures it out.</p>
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <GraduationCap size={48} color="#0a84ff" />
+            <h1 className="display" style={{ marginTop: 10 }}>{info.classroomName || 'Coaching Center'}</h1>
+          </div>
+
+          <div className="login-hints">
+            <div className="login-hint">🎓 <strong>Teacher</strong> — enter your password</div>
+            <div className="login-hint">👨‍👩‍👧 <strong>Parent</strong> — enter your code (e.g. K7842M)</div>
+            <div className="login-hint">📚 <strong>Student</strong> — enter your roll number (e.g. 003)</div>
+          </div>
+
           <form onSubmit={submit}>
-            <label>PASSWORD OR PARENT CODE</label>
+            <label>PASSWORD / CODE / ROLL NUMBER</label>
             <div className="password-field">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder="Password or code (e.g. K7842M)"
+                placeholder="Enter password, code, or roll number"
                 autoFocus
+                autoCapitalize="off"
+                autoCorrect="off"
               />
               <button type="button" className="icon-btn" onClick={() => setShowPassword(!showPassword)}>
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
             {error && <div className="error-box">{error}</div>}
-            <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign In'}
+            <button type="submit" className="btn btn-primary btn-block" disabled={loading || !password.trim()}>
+              {loading ? 'Signing in...' : 'Sign In →'}
             </button>
           </form>
-          <hr />
-          <p className="text-center small muted">
-            Parent code format: a letter, the last 4 digits of your phone, then another letter. Like <strong>K7842M</strong>. Ask {info.teacherName || 'the teacher'} if you don't have one.
-          </p>
         </div>
       </div>
     </div>
   );
 }
 
-// ============================
-// STUDENT LOGIN (roll number only) — for chat + complaints (requests #14, #16)
-// ============================
-function StudentLogin({ info, onBack, onLogin }) {
-  const [roll, setRoll] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    if (e) e.preventDefault();
-    setLoading(true); setError('');
-    try {
-      const res = await api.post('/auth/student-login', { rollNumber: roll.trim() });
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('role', 'student');
-      onLogin(res.data.student);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Could not log in');
-    } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="page-center">
-      <div className="container-narrow">
-        <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
-        <div className="auth-form" style={{ maxWidth: 460, margin: '0 auto' }}>
-          <h1 className="display"><MessageCircle size={22} /> Student Sign In</h1>
-          <p className="muted">Enter your roll number to access group chat, complaint inbox, and the AI assistant.</p>
-          <form onSubmit={submit}>
-            <label>Roll Number</label>
-            <input
-              value={roll}
-              onChange={e => setRoll(e.target.value)}
-              placeholder="e.g. 003"
-              autoFocus
-              style={{ fontSize: 22, letterSpacing: 4, textAlign: 'center' }}
-            />
-            {error && <div className="error-box">{error}</div>}
-            <button type="submit" className="btn btn-primary btn-block" disabled={loading || !roll}>
-              {loading ? 'Checking...' : 'Continue'}
-            </button>
-          </form>
-          <hr />
-          <p className="text-center small muted">
-            Don't know your roll number? Check with {info.teacherName || 'your teacher'}.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ============================
 // REGISTER (self-registration form)
@@ -2670,17 +2630,35 @@ function Modal({ title, children, onClose }) {
   );
 }
 
-// ============================
-// v4: SHARED COMPONENTS
-// ============================
+// AI Bot avatar — sparkle gradient circle with "AI" text
+function AIAvatar({ size = 32 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0, borderRadius: '50%' }}>
+      <defs>
+        <linearGradient id="aiGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#0a84ff"/>
+          <stop offset="1" stopColor="#bf5af2"/>
+        </linearGradient>
+      </defs>
+      <circle cx="20" cy="20" r="20" fill="url(#aiGrad)"/>
+      <text x="50%" y="55%" textAnchor="middle" fill="#fff" fontSize="14" fontWeight="700" fontFamily="system-ui,sans-serif" dominantBaseline="middle">AI</text>
+      <circle cx="32" cy="10" r="3" fill="#ffd60a" opacity="0.9"/>
+      <circle cx="35" cy="18" r="2" fill="#ffd60a" opacity="0.6"/>
+      <circle cx="28" cy="6" r="2" fill="#ffffff" opacity="0.5"/>
+    </svg>
+  );
+}
 
-// ----- AI ASSISTANT (request #15) -----
+// ============================
+// AI ASSISTANT (request #15)
+// ============================
 function AIAssistant() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notConfigured, setNotConfigured] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -2699,14 +2677,18 @@ function AIAssistant() {
       const r = await api.post('/ai/chat', { messages: newMsgs });
       setMessages([...newMsgs, { role: 'assistant', content: r.data.reply }]);
     } catch (err) {
-      setError(err.response?.data?.error || 'AI request failed');
+      if (err.response?.data?.error === 'AI_NOT_CONFIGURED') {
+        setNotConfigured(true);
+      } else {
+        setError(err.response?.data?.error || 'AI request failed');
+      }
     } finally { setBusy(false); }
   };
 
   if (!open) {
     return (
       <button className="ai-fab" onClick={() => setOpen(true)} title="AI Assistant" aria-label="Open AI Assistant">
-        <Sparkles size={22} />
+        <AIAvatar size={38} />
       </button>
     );
   }
@@ -2714,33 +2696,63 @@ function AIAssistant() {
   return (
     <div className="ai-panel">
       <div className="ai-header">
-        <strong><Sparkles size={16} /> AI Assistant</strong>
-        <button className="icon-btn" onClick={() => setOpen(false)}><X size={16} /></button>
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <AIAvatar size={28} />
+          <strong>AI Assistant</strong>
+        </div>
+        <button className="icon-btn" onClick={() => setOpen(false)} style={{ color: '#fff' }}><X size={16} /></button>
       </div>
       <div className="ai-body" ref={scrollRef}>
-        {messages.length === 0 && (
-          <p className="muted small">
-            Ask anything about your coaching center, attendance, fees, or general questions. I speak whatever language you write in.
-          </p>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={'ai-bubble ' + (m.role === 'user' ? 'me' : 'bot')}>
-            {m.content}
+        {notConfigured ? (
+          <div className="ai-setup-card">
+            <AIAvatar size={48} />
+            <h3>AI not set up yet</h3>
+            <p>To enable the AI assistant, add this to your hosting dashboard (e.g. Render):</p>
+            <div className="setup-step"><span className="step-num">1</span> Go to your service on <strong>render.com</strong></div>
+            <div className="setup-step"><span className="step-num">2</span> Click <strong>Environment</strong> in the left sidebar</div>
+            <div className="setup-step"><span className="step-num">3</span> Click <strong>Add Environment Variable</strong></div>
+            <div className="setup-step"><span className="step-num">4</span> Key: <code>ANTHROPIC_API_KEY</code></div>
+            <div className="setup-step"><span className="step-num">5</span> Value: your key from <a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a></div>
+            <div className="setup-step"><span className="step-num">6</span> Click <strong>Save Changes</strong> — app redeploys automatically</div>
           </div>
-        ))}
-        {busy && <div className="ai-bubble bot ai-typing">…</div>}
-        {error && <div className="error-box small">{error}</div>}
+        ) : (
+          <>
+            {messages.length === 0 && (
+              <div className="ai-welcome">
+                <AIAvatar size={44} />
+                <p>Hello! I can help with attendance, fees, schedules, or any questions. I speak Hindi, Punjabi, English — whatever you prefer.</p>
+              </div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={'ai-msg-row ' + (m.role === 'user' ? 'me' : 'bot')}>
+                {m.role === 'assistant' && <AIAvatar size={26} />}
+                <div className={'ai-bubble ' + (m.role === 'user' ? 'me' : 'bot')}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {busy && (
+              <div className="ai-msg-row bot">
+                <AIAvatar size={26} />
+                <div className="ai-bubble bot ai-typing">● ● ●</div>
+              </div>
+            )}
+            {error && <div className="error-box small">{error}</div>}
+          </>
+        )}
       </div>
-      <div className="ai-input-row">
-        <textarea
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Type your question…"
-          rows={1}
-        />
-        <button className="btn btn-primary" onClick={send} disabled={busy || !input.trim()}><Send size={14} /></button>
-      </div>
+      {!notConfigured && (
+        <div className="ai-input-row">
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Ask anything…"
+            rows={1}
+          />
+          <button className="btn btn-primary" onClick={send} disabled={busy || !input.trim()}><Send size={14} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2809,15 +2821,36 @@ function GroupChat({ role, currentName }) {
         {messages.length === 0 && <p className="muted small">No messages yet. Be the first to say hi.</p>}
         {messages.map(m => {
           const mine = (role === 'teacher' && m.role === 'teacher') || (role !== 'teacher' && m.name === currentName);
+          const isTeacher = m.role === 'teacher';
           return (
-            <div key={m._id} className={'chat-msg ' + (mine ? 'me' : 'them') + (m.role === 'teacher' ? ' teacher' : '')}>
-              <div className="chat-meta">
-                <strong>{m.name}</strong>
-                {m.role === 'teacher' && <span className="chat-tag">Teacher</span>}
-                {m.rollNumber && <span className="muted small"> · Roll {m.rollNumber}</span>}
-                <span className="muted small chat-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <div key={m._id} className={'chat-row ' + (mine ? 'me' : 'them')}>
+              {!mine && (
+                <div className="chat-avatar">
+                  {isTeacher
+                    ? <div className="chat-avatar-teacher"><GraduationCap size={16} /></div>
+                    : m.photo
+                      ? <img src={m.photo} alt={m.name} />
+                      : <div className="chat-avatar-default"><User size={16} /></div>}
+                </div>
+              )}
+              <div className={'chat-msg ' + (mine ? 'me' : isTeacher ? 'teacher' : '')}>
+                <div className="chat-meta">
+                  <strong>{m.name}</strong>
+                  {isTeacher && <span className="chat-tag">Teacher</span>}
+                  {m.rollNumber && !mine && <span className="muted small"> #{m.rollNumber}</span>}
+                  <span className="muted small chat-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <div className="chat-text">{m.text}</div>
               </div>
-              <div className="chat-text">{m.text}</div>
+              {mine && (
+                <div className="chat-avatar">
+                  {isTeacher
+                    ? <div className="chat-avatar-teacher"><GraduationCap size={16} /></div>
+                    : m.photo
+                      ? <img src={m.photo} alt={m.name} />
+                      : <div className="chat-avatar-default"><User size={16} /></div>}
+                </div>
+              )}
             </div>
           );
         })}
@@ -3089,11 +3122,24 @@ function AIAssistantInline() {
   return (
     <div className="ai-inline">
       <div className="ai-body" ref={scrollRef} style={{ minHeight: 320, maxHeight: 480 }}>
-        {messages.length === 0 && <p className="muted small">Hi! I can help with attendance info, fees, schedule, or general questions.</p>}
+        {messages.length === 0 && (
+          <div className="ai-welcome">
+            <AIAvatar size={40} />
+            <p>Hi! Ask me anything — attendance, fees, schedule, or general help. I understand Hindi, Punjabi, and English.</p>
+          </div>
+        )}
         {messages.map((m, i) => (
-          <div key={i} className={'ai-bubble ' + (m.role === 'user' ? 'me' : 'bot')}>{m.content}</div>
+          <div key={i} className={'ai-msg-row ' + (m.role === 'user' ? 'me' : 'bot')}>
+            {m.role === 'assistant' && <AIAvatar size={26} />}
+            <div className={'ai-bubble ' + (m.role === 'user' ? 'me' : 'bot')}>{m.content}</div>
+          </div>
         ))}
-        {busy && <div className="ai-bubble bot ai-typing">…</div>}
+        {busy && (
+          <div className="ai-msg-row bot">
+            <AIAvatar size={26} />
+            <div className="ai-bubble bot ai-typing">● ● ●</div>
+          </div>
+        )}
       </div>
       {error && <div className="error-box small">{error}</div>}
       <div className="ai-input-row">

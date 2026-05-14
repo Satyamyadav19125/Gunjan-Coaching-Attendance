@@ -2711,8 +2711,8 @@ function AIAssistant() {
             <div className="setup-step"><span className="step-num">1</span> Go to your service on <strong>render.com</strong></div>
             <div className="setup-step"><span className="step-num">2</span> Click <strong>Environment</strong> in the left sidebar</div>
             <div className="setup-step"><span className="step-num">3</span> Click <strong>Add Environment Variable</strong></div>
-            <div className="setup-step"><span className="step-num">4</span> Key: <code>ANTHROPIC_API_KEY</code></div>
-            <div className="setup-step"><span className="step-num">5</span> Value: your key from <a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a></div>
+            <div className="setup-step"><span className="step-num">4</span> Key: <code>GEMINI_API_KEY</code></div>
+            <div className="setup-step"><span className="step-num">5</span> Value: your key from <a href="https://aistudio.google.com" target="_blank" rel="noreferrer">aistudio.google.com</a> (free!)</div>
             <div className="setup-step"><span className="step-num">6</span> Click <strong>Save Changes</strong> — app redeploys automatically</div>
           </div>
         ) : (

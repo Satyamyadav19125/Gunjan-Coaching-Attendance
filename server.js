@@ -96,6 +96,7 @@ const StudentSchema = new mongoose.Schema({
   parentPhone: String,
   aadhar: String,
   birthday: String,
+  photo: String, // base64 data URL (small, capped at ~200KB by frontend)
   subjects: { type: [String], default: [] }, // subject names; just for organization, no fee impact
   className: { type: String, default: '' },   // name of the class (fees come from Config.classes)
   batchId: { type: String, default: '' },     // _id of a Config.batches entry, or '' for none
@@ -104,6 +105,7 @@ const StudentSchema = new mongoose.Schema({
   joinDate: { type: Date, default: Date.now },
   enrollmentDate: { type: String, default: () => istDateISO() }, // YYYY-MM-DD, used for fees
   registeredVia: { type: String, enum: ['teacher', 'self'], default: 'teacher' },
+  pendingApproval: { type: Boolean, default: false }, // self-registered students wait for teacher approval
 });
 
 const AttendanceSchema = new mongoose.Schema({
@@ -114,6 +116,7 @@ const AttendanceSchema = new mongoose.Schema({
   outTime: String,
   markedBy: { type: String, enum: ['self', 'teacher'], default: 'self' },
   reason: String,
+  note: String, // optional note left by the student when self-marking
 });
 AttendanceSchema.index({ studentId: 1, date: 1 }, { unique: true });
 
@@ -125,32 +128,112 @@ const AnnouncementSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// v4: parent → teacher inbox
+const ParentMessageSchema = new mongoose.Schema({
+  studentId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  studentName: String,
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  read: { type: Boolean, default: false },
+});
+
+// v4: student → teacher complaint (private)
+const ComplaintSchema = new mongoose.Schema({
+  studentId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  studentName: String,
+  rollNumber: String,
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  read: { type: Boolean, default: false },
+});
+
+// v4: group chat (all students + teacher)
+const ChatMessageSchema = new mongoose.Schema({
+  role: { type: String, enum: ['student', 'teacher'], required: true },
+  studentId: { type: mongoose.Schema.Types.ObjectId },
+  name: { type: String, required: true },
+  rollNumber: String,
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now, index: true },
+});
+
 const Config = mongoose.model('Config', ConfigSchema);
 const Student = mongoose.model('Student', StudentSchema);
 const Attendance = mongoose.model('Attendance', AttendanceSchema);
 const Announcement = mongoose.model('Announcement', AnnouncementSchema);
+const ParentMessage = mongoose.model('ParentMessage', ParentMessageSchema);
+const Complaint = mongoose.model('Complaint', ComplaintSchema);
+const ChatMessage = mongoose.model('ChatMessage', ChatMessageSchema);
 
 // ===========================
 // ID + CODE HELPERS
 // ===========================
-const generateParentCode = () => {
-  // 6-char uppercase alphanumeric, no confusable chars (no 0/O/1/I)
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out = '';
-  for (let i = 0; i < 6; i++) {
-    out += alphabet[crypto.randomInt(0, alphabet.length)];
-  }
-  return out;
+// Friendlier code: letter + last4 of parent phone + letter, e.g. K7842M.
+// Falls back to random digits when no parent phone is available.
+const FRIENDLY_CONSONANTS = 'BCDFGHJKLMNPQRSTVWXYZ'.split(''); // no vowels, no I/O ambiguity
+const generateParentCode = (parentPhone) => {
+  const last4 = (parentPhone || '').replace(/\D/g, '').slice(-4);
+  const digits = last4.length === 4
+    ? last4
+    : Array.from({ length: 4 }, () => crypto.randomInt(0, 10)).join('');
+  const c1 = FRIENDLY_CONSONANTS[crypto.randomInt(0, FRIENDLY_CONSONANTS.length)];
+  const c2 = FRIENDLY_CONSONANTS[crypto.randomInt(0, FRIENDLY_CONSONANTS.length)];
+  return c1 + digits + c2;
 };
 
-const ensureUniqueParentCode = async () => {
-  for (let i = 0; i < 12; i++) {
-    const code = generateParentCode();
+const ensureUniqueParentCode = async (parentPhone) => {
+  for (let i = 0; i < 20; i++) {
+    const code = generateParentCode(parentPhone);
     const exists = await Student.findOne({ parentCode: code });
     if (!exists) return code;
   }
-  // Extremely unlikely fallback
+  // very unlikely fallback
   return generateParentCode() + Date.now().toString(36).slice(-2).toUpperCase();
+};
+
+// Verhoeff checksum (UIDAI's algorithm) — catches typos and fake Aadhar numbers.
+const VERHOEFF_D = [
+  [0,1,2,3,4,5,6,7,8,9],
+  [1,2,3,4,0,6,7,8,9,5],
+  [2,3,4,0,1,7,8,9,5,6],
+  [3,4,0,1,2,8,9,5,6,7],
+  [4,0,1,2,3,9,5,6,7,8],
+  [5,9,8,7,6,0,4,3,2,1],
+  [6,5,9,8,7,1,0,4,3,2],
+  [7,6,5,9,8,2,1,0,4,3],
+  [8,7,6,5,9,3,2,1,0,4],
+  [9,8,7,6,5,4,3,2,1,0],
+];
+const VERHOEFF_P = [
+  [0,1,2,3,4,5,6,7,8,9],
+  [1,5,7,6,2,8,3,0,9,4],
+  [5,8,0,3,7,9,6,1,4,2],
+  [8,9,1,6,0,4,3,5,2,7],
+  [9,4,5,3,1,2,6,8,7,0],
+  [4,2,8,6,5,7,3,9,0,1],
+  [2,7,9,3,8,0,6,4,1,5],
+  [7,0,4,6,9,1,3,2,5,8],
+];
+const isValidAadhar = (s) => {
+  const d = (s || '').replace(/\s/g, '');
+  if (!/^\d{12}$/.test(d)) return false;
+  let c = 0;
+  const rev = d.split('').reverse();
+  for (let i = 0; i < rev.length; i++) {
+    c = VERHOEFF_D[c][VERHOEFF_P[i % 8][parseInt(rev[i], 10)]];
+  }
+  return c === 0;
+};
+
+const ageFromDOB = (dob) => {
+  if (!dob) return null;
+  const [y, m, d] = String(dob).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const mDiff = (today.getMonth() + 1) - m;
+  if (mDiff < 0 || (mDiff === 0 && today.getDate() < d)) age--;
+  return age >= 0 && age < 150 ? age : null;
 };
 
 // ===========================
@@ -172,9 +255,9 @@ const teacherOnly = (req, res, next) => {
   next();
 };
 
-// A "parent" token is scoped to a single studentId. They can only read that student.
+// A "parent" or "student" token is scoped to a single studentId.
 const parentScopeCheck = (req, studentId) => {
-  if (req.user.role === 'parent') {
+  if (req.user.role === 'parent' || req.user.role === 'student') {
     if (!req.user.studentId || String(req.user.studentId) !== String(studentId)) {
       return false;
     }
@@ -218,31 +301,61 @@ app.post('/api/auth/setup', async (req, res) => {
   }
 });
 
-// Password login: teacher only. Parents use code; students never log in.
+// Unified login: accepts either teacher password OR parent code in a single field.
+// The server figures out which it is.
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { password } = req.body;
-    if (!password) return res.status(401).json({ error: 'Password required' });
+    const raw = (req.body.password || '').trim();
+    if (!raw) return res.status(401).json({ error: 'Password required' });
     const config = await Config.findOne();
     if (!config) return res.status(401).json({ error: 'System not set up' });
-    const isT = await bcrypt.compare(password, config.teacherPassword);
-    if (!isT) return res.status(401).json({ error: 'Wrong password' });
-    const token = jwt.sign({ role: 'teacher' }, JWT_SECRET);
-    res.json({ token, role: 'teacher' });
+
+    // 1) Try as teacher password
+    if (config.teacherPassword) {
+      const isT = await bcrypt.compare(raw, config.teacherPassword);
+      if (isT) {
+        const token = jwt.sign({ role: 'teacher' }, JWT_SECRET);
+        return res.json({ token, role: 'teacher' });
+      }
+    }
+
+    // 2) Try as parent code (case-insensitive)
+    const code = raw.toUpperCase();
+    const student = await Student.findOne({ parentCode: code, pendingApproval: { $ne: true } });
+    if (student) {
+      const token = jwt.sign({ role: 'parent', studentId: String(student._id) }, JWT_SECRET, { expiresIn: '365d' });
+      return res.json({ token, role: 'parent', student });
+    }
+
+    return res.status(401).json({ error: 'Wrong password or code' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Parent login by unique code. Token lasts 365 days so they stay signed in.
+// Legacy/standalone parent-login kept for backwards compat
 app.post('/api/auth/parent-login', async (req, res) => {
   try {
     const code = (req.body.code || '').trim().toUpperCase();
     if (!code) return res.status(401).json({ error: 'Code required' });
-    const student = await Student.findOne({ parentCode: code });
+    const student = await Student.findOne({ parentCode: code, pendingApproval: { $ne: true } });
     if (!student) return res.status(401).json({ error: 'Invalid code' });
     const token = jwt.sign({ role: 'parent', studentId: String(student._id) }, JWT_SECRET, { expiresIn: '365d' });
     res.json({ token, role: 'parent', student });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Student chat login: roll number only (for chat + complaint access, request #14, #16)
+app.post('/api/auth/student-login', async (req, res) => {
+  try {
+    const roll = (req.body.rollNumber || '').trim();
+    if (!roll) return res.status(401).json({ error: 'Roll number required' });
+    const student = await Student.findOne({ rollNumber: roll, pendingApproval: { $ne: true } });
+    if (!student) return res.status(401).json({ error: 'Roll number not found (or not yet approved)' });
+    const token = jwt.sign({ role: 'student', studentId: String(student._id) }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, role: 'student', student: { _id: student._id, name: student.name, rollNumber: student.rollNumber, className: student.className } });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -263,13 +376,26 @@ app.get('/api/public/info', async (req, res) => {
 
 app.post('/api/public/register', async (req, res) => {
   try {
-    const { name, phone, parentName, parentPhone, aadhar, birthday, subjects, className, batchId, notes } = req.body;
+    const { name, phone, parentName, parentPhone, aadhar, birthday, subjects, className, batchId, notes, photo } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'Name and phone are required' });
+
+    // Reject duplicate phone numbers (request #6)
+    const cleanPhone = (phone || '').replace(/\D/g, '');
+    if (cleanPhone) {
+      const dupe = await Student.findOne({ phone: { $regex: cleanPhone + '$' } });
+      if (dupe) return res.status(409).json({ error: 'A student with this phone number is already registered.' });
+    }
+
+    // Validate Aadhar if provided (request #4)
+    if (aadhar && !isValidAadhar(aadhar)) {
+      return res.status(400).json({ error: 'Aadhar number is invalid. Please check the 12 digits.' });
+    }
+
     const count = await Student.countDocuments();
     const rollNumber = String(count + 1).padStart(3, '0');
-    const parentCode = await ensureUniqueParentCode();
+    const parentCode = await ensureUniqueParentCode(parentPhone);
     const student = new Student({
-      name, phone, parentName, parentPhone, aadhar, birthday,
+      name, phone, parentName, parentPhone, aadhar, birthday, photo,
       subjects: subjects || [],
       className: className || '',
       batchId: batchId || '',
@@ -279,9 +405,10 @@ app.post('/api/public/register', async (req, res) => {
       enrollmentDate: istDateISO(),
       joinDate: new Date(),
       registeredVia: 'self',
+      pendingApproval: true, // teacher must approve (request #3)
     });
     await student.save();
-    res.json({ ok: true, message: 'Registered. Your parent code is ' + parentCode + ' — keep it safe.', student });
+    res.json({ ok: true, message: 'Registration submitted. Your teacher will review and approve. Your parent code is ' + parentCode + ' — keep it safe.', student });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -293,11 +420,22 @@ app.post('/api/public/register', async (req, res) => {
 
 app.get('/api/students', authenticate, async (req, res) => {
   try {
-    if (req.user.role === 'parent') {
+    if (req.user.role === 'parent' || req.user.role === 'student') {
       const s = await Student.findById(req.user.studentId);
       return res.json(s ? [s] : []);
     }
-    const students = await Student.find().sort({ name: 1 });
+    // Teacher: only approved students in the main list
+    const students = await Student.find({ pendingApproval: { $ne: true } }).sort({ name: 1 });
+    res.json(students);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pending self-registrations awaiting teacher approval
+app.get('/api/students/pending', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const students = await Student.find({ pendingApproval: true }).sort({ joinDate: -1 });
     res.json(students);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -317,9 +455,17 @@ app.get('/api/students/:id', authenticate, async (req, res) => {
 
 app.post('/api/students', authenticate, teacherOnly, async (req, res) => {
   try {
+    const cleanPhone = (req.body.phone || '').replace(/\D/g, '');
+    if (cleanPhone) {
+      const dupe = await Student.findOne({ phone: { $regex: cleanPhone + '$' } });
+      if (dupe) return res.status(409).json({ error: 'A student with this phone number already exists.' });
+    }
+    if (req.body.aadhar && !isValidAadhar(req.body.aadhar)) {
+      return res.status(400).json({ error: 'Aadhar number is invalid (failed checksum).' });
+    }
     const count = await Student.countDocuments();
     const rollNumber = req.body.rollNumber || String(count + 1).padStart(3, '0');
-    const parentCode = req.body.parentCode || await ensureUniqueParentCode();
+    const parentCode = req.body.parentCode || await ensureUniqueParentCode(req.body.parentPhone);
     const student = new Student({
       ...req.body,
       rollNumber,
@@ -327,6 +473,7 @@ app.post('/api/students', authenticate, teacherOnly, async (req, res) => {
       enrollmentDate: req.body.enrollmentDate || istDateISO(),
       joinDate: new Date(),
       registeredVia: 'teacher',
+      pendingApproval: false,
     });
     await student.save();
     res.json(student);
@@ -338,9 +485,35 @@ app.post('/api/students', authenticate, teacherOnly, async (req, res) => {
 app.put('/api/students/:id', authenticate, teacherOnly, async (req, res) => {
   try {
     const update = { ...req.body };
-    // Don't allow changing parentCode unless explicitly regenerating
-    delete update.parentCode;
+    delete update.parentCode; // Don't allow changing parentCode here
+
+    // Re-check Aadhar on edit if it changed
+    if (update.aadhar) {
+      const existing = await Student.findById(req.params.id).select('aadhar');
+      if (existing && update.aadhar !== existing.aadhar && !isValidAadhar(update.aadhar)) {
+        return res.status(400).json({ error: 'Aadhar number is invalid (failed checksum).' });
+      }
+    }
+    // Phone dup check (only if phone changed)
+    if (update.phone) {
+      const cleanPhone = update.phone.replace(/\D/g, '');
+      if (cleanPhone) {
+        const dupe = await Student.findOne({ phone: { $regex: cleanPhone + '$' }, _id: { $ne: req.params.id } });
+        if (dupe) return res.status(409).json({ error: 'Another student already has this phone number.' });
+      }
+    }
     const student = await Student.findByIdAndUpdate(req.params.id, update, { new: true });
+    res.json(student);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Approve a self-registered student (request #3)
+app.post('/api/students/:id/approve', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const student = await Student.findByIdAndUpdate(req.params.id, { pendingApproval: false }, { new: true });
+    if (!student) return res.status(404).json({ error: 'Not found' });
     res.json(student);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -437,7 +610,7 @@ app.post('/api/attendance/check', authenticate, async (req, res) => {
 // physically tapped their own name on the teacher's device.
 app.post('/api/attendance/self-mark', authenticate, teacherOnly, async (req, res) => {
   try {
-    const { studentId } = req.body;
+    const { studentId, note } = req.body;
     if (!studentId) return res.status(400).json({ error: 'studentId required' });
     const today = istDateISO();
     const timeStr = istTimeHM();
@@ -445,11 +618,13 @@ app.post('/api/attendance/self-mark', authenticate, teacherOnly, async (req, res
     if (!attendance) {
       attendance = new Attendance({
         studentId, date: today, status: 'present', markedBy: 'self', inTime: timeStr,
+        note: note || undefined,
       });
     } else {
       attendance.status = 'present';
       attendance.markedBy = 'self';
       if (!attendance.inTime) attendance.inTime = timeStr;
+      if (note) attendance.note = note;
     }
     await attendance.save();
     res.json(attendance);
@@ -761,6 +936,279 @@ app.put('/api/config', authenticate, teacherOnly, async (req, res) => {
     res.json({ ok: true, config: safe });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// PARENT → TEACHER MESSAGES (request #12)
+// ===========================
+const parentOnly = (req, res, next) => {
+  if (req.user.role !== 'parent') return res.status(403).json({ error: 'Parent only' });
+  next();
+};
+
+app.post('/api/parent-messages', authenticate, parentOnly, async (req, res) => {
+  try {
+    const text = (req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Message required' });
+    if (text.length > 2000) return res.status(400).json({ error: 'Message too long (max 2000 chars)' });
+    const student = await Student.findById(req.user.studentId).select('name');
+    const msg = new ParentMessage({
+      studentId: req.user.studentId,
+      studentName: student?.name || 'Parent',
+      text,
+    });
+    await msg.save();
+    res.json({ ok: true, message: msg });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/parent-messages', authenticate, async (req, res) => {
+  try {
+    if (req.user.role === 'teacher') {
+      const messages = await ParentMessage.find().sort({ createdAt: -1 }).limit(200);
+      const unread = await ParentMessage.countDocuments({ read: false });
+      return res.json({ messages, unread });
+    }
+    if (req.user.role === 'parent') {
+      const messages = await ParentMessage.find({ studentId: req.user.studentId }).sort({ createdAt: -1 }).limit(100);
+      return res.json({ messages, unread: 0 });
+    }
+    res.status(403).json({ error: 'Forbidden' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/parent-messages/:id/read', authenticate, teacherOnly, async (req, res) => {
+  try {
+    await ParentMessage.findByIdAndUpdate(req.params.id, { read: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Unread count only (for badge polling)
+app.get('/api/parent-messages/unread-count', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const unread = await ParentMessage.countDocuments({ read: false });
+    res.json({ unread });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// STUDENT COMPLAINTS (request #16)
+// ===========================
+const studentOnly = (req, res, next) => {
+  if (req.user.role !== 'student') return res.status(403).json({ error: 'Student only' });
+  next();
+};
+
+app.post('/api/complaints', authenticate, studentOnly, async (req, res) => {
+  try {
+    const text = (req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Complaint text required' });
+    if (text.length > 5000) return res.status(400).json({ error: 'Too long' });
+    const student = await Student.findById(req.user.studentId).select('name rollNumber');
+    const c = new Complaint({
+      studentId: req.user.studentId,
+      studentName: student?.name || 'Student',
+      rollNumber: student?.rollNumber || '',
+      text,
+    });
+    await c.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/complaints', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const complaints = await Complaint.find().sort({ createdAt: -1 }).limit(200);
+    const unread = await Complaint.countDocuments({ read: false });
+    res.json({ complaints, unread });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/complaints/:id/read', authenticate, teacherOnly, async (req, res) => {
+  try {
+    await Complaint.findByIdAndUpdate(req.params.id, { read: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/complaints/unread-count', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const unread = await Complaint.countDocuments({ read: false });
+    res.json({ unread });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// GROUP CHAT (request #14) — students + teacher, polled
+// ===========================
+app.get('/api/chat/messages', authenticate, async (req, res) => {
+  try {
+    if (!['teacher', 'student'].includes(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
+    const since = req.query.since;
+    const filter = since ? { createdAt: { $gt: new Date(since) } } : {};
+    const messages = await ChatMessage.find(filter).sort({ createdAt: 1 }).limit(200);
+    res.json({ messages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/chat/messages', authenticate, async (req, res) => {
+  try {
+    if (!['teacher', 'student'].includes(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
+    const text = (req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Empty message' });
+    if (text.length > 1000) return res.status(400).json({ error: 'Too long (max 1000 chars)' });
+    let name = 'Teacher';
+    let rollNumber = '';
+    let studentId = null;
+    if (req.user.role === 'student') {
+      const s = await Student.findById(req.user.studentId).select('name rollNumber');
+      if (!s) return res.status(404).json({ error: 'Student not found' });
+      name = s.name;
+      rollNumber = s.rollNumber;
+      studentId = req.user.studentId;
+    } else {
+      const cfg = await Config.findOne().select('teacherName');
+      name = cfg?.teacherName || 'Teacher';
+    }
+    const msg = new ChatMessage({
+      role: req.user.role, studentId, name, rollNumber, text,
+    });
+    await msg.save();
+    res.json({ ok: true, message: msg });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// AI ASSISTANT (request #15) — Anthropic-powered, role-aware
+// ===========================
+let anthropicClient = null;
+const initAnthropic = async () => {
+  if (anthropicClient) return anthropicClient;
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    return anthropicClient;
+  } catch (err) {
+    console.error('Anthropic SDK init failed:', err.message);
+    return null;
+  }
+};
+
+// Build a role-scoped data summary that goes into the system prompt.
+const buildAIContext = async (user) => {
+  const cfg = await Config.findOne().select('-teacherPassword').lean();
+  const lines = [];
+  lines.push(`Coaching Center: ${cfg?.classroomName || 'Unknown'}`);
+  if (cfg?.teacherName) lines.push(`Teacher: ${cfg.teacherName}`);
+  lines.push(`Today's date (IST): ${istDateISO()}`);
+
+  if (user.role === 'teacher') {
+    const students = await Student.find({ pendingApproval: { $ne: true } }).select('name rollNumber className batchId subjects phone parentPhone birthday').lean();
+    const totalCount = students.length;
+    const byClass = {};
+    students.forEach(s => { const k = s.className || 'Unassigned'; byClass[k] = (byClass[k] || 0) + 1; });
+    lines.push(`Total students: ${totalCount}`);
+    lines.push(`By class: ${Object.entries(byClass).map(([k,v]) => `${k}: ${v}`).join(', ')}`);
+    if (cfg?.classes?.length) lines.push(`Classes & fees: ${cfg.classes.map(c => `${c.name} (₹${c.monthlyFee}/mo)`).join('; ')}`);
+    if (cfg?.batches?.length) lines.push(`Batches: ${cfg.batches.map(b => `${b.name} (${b.startTime}-${b.endTime})`).join('; ')}`);
+    if (cfg?.subjects?.length) lines.push(`Subjects: ${cfg.subjects.map(s => s.name).join(', ')}`);
+    // Top of mind: today's attendance
+    const today = istDateISO();
+    const todayAtt = await Attendance.find({ date: today }).lean();
+    const present = todayAtt.filter(a => a.status === 'present').length;
+    const absent  = todayAtt.filter(a => a.status === 'absent').length;
+    lines.push(`Today: ${present} present, ${absent} absent, ${totalCount - todayAtt.length} not yet marked.`);
+    // Full roster (capped)
+    lines.push('\nFull student roster:');
+    students.slice(0, 200).forEach(s => {
+      lines.push(`- ${s.name} (Roll ${s.rollNumber}) — Class: ${s.className || '—'}, Phone: ${s.phone || '—'}, Parent: ${s.parentPhone || '—'}, DOB: ${s.birthday || '—'}`);
+    });
+  } else if (user.role === 'parent' || user.role === 'student') {
+    const s = await Student.findById(user.studentId).lean();
+    if (!s) { lines.push('Student record not found.'); return lines.join('\n'); }
+    const cls = cfg?.classes?.find(c => c.name === s.className);
+    const batch = cfg?.batches?.find(b => String(b._id) === String(s.batchId));
+    lines.push(`\nStudent: ${s.name} (Roll ${s.rollNumber})`);
+    lines.push(`Class: ${s.className || '—'} (Monthly fee: ₹${cls?.monthlyFee || 0})`);
+    if (batch) lines.push(`Batch: ${batch.name} (${batch.startTime}-${batch.endTime})`);
+    if (s.subjects?.length) lines.push(`Subjects: ${s.subjects.join(', ')}`);
+    if (s.birthday) lines.push(`Date of birth: ${s.birthday}`);
+    // Recent attendance
+    const recent = await Attendance.find({ studentId: s._id }).sort({ date: -1 }).limit(14).lean();
+    if (recent.length) {
+      lines.push('Recent attendance:');
+      recent.forEach(r => lines.push(`  ${r.date}: ${r.status}${r.inTime ? ` (in ${r.inTime})` : ''}${r.reason ? ` reason: ${r.reason}` : ''}`));
+    }
+  }
+  return lines.join('\n');
+};
+
+app.post('/api/ai/chat', authenticate, async (req, res) => {
+  try {
+    const client = await initAnthropic();
+    if (!client) {
+      return res.status(503).json({ error: 'AI assistant is not configured. Ask the admin to set ANTHROPIC_API_KEY on the server.' });
+    }
+    const userMessages = req.body.messages;
+    if (!Array.isArray(userMessages) || !userMessages.length) {
+      return res.status(400).json({ error: 'messages array required' });
+    }
+    const context = await buildAIContext(req.user);
+    const roleLabel = req.user.role === 'teacher' ? 'the teacher' : (req.user.role === 'parent' ? 'a parent' : 'a student');
+    const systemPrompt = `You are the friendly AI assistant for this coaching center. You are speaking with ${roleLabel}.
+Reply in whatever language the user writes in. Be concise, warm, and accurate. If the user asks for information you don't have access to in the context below, say so honestly.
+
+CURRENT DATA (treat as the source of truth):
+${context}
+
+IMPORTANT:
+- Never invent student details, fees, or attendance records — only use what's in the context above.
+- For parents/students, you can only see and discuss their own information, never other students'.`;
+
+    // Sanitize messages: only role+content, strings only
+    const msgs = userMessages
+      .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+      .slice(-20) // last 20 turns
+      .map(m => ({ role: m.role, content: m.content.slice(0, 4000) }));
+
+    if (!msgs.length || msgs[msgs.length - 1].role !== 'user') {
+      return res.status(400).json({ error: 'Last message must be from user' });
+    }
+
+    const completion = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: msgs,
+    });
+    const text = (completion.content || []).map(c => c.type === 'text' ? c.text : '').join('').trim();
+    res.json({ reply: text || '(no reply)' });
+  } catch (err) {
+    console.error('AI error:', err);
+    res.status(500).json({ error: err.message || 'AI request failed' });
   }
 });
 

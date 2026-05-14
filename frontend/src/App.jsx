@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GraduationCap, LogIn, LogOut, User, Users, UserPlus,
   Calendar, CalendarOff, Clock, Phone, Mail, MapPin,
@@ -7,7 +7,8 @@ import {
   AlertTriangle, Info, BarChart3, MessageSquare, Send,
   Megaphone, Eye, EyeOff, BookOpen, Settings,
   Cake, Share2, MessageCircle, CalendarDays, Copy,
-  Wallet, RotateCcw, KeyRound, IndianRupee, Layers
+  Wallet, RotateCcw, KeyRound, IndianRupee, Layers,
+  Camera, Sparkles, RefreshCw, AlertCircle, Inbox, Hash, Check
 } from 'lucide-react';
 import axios from 'axios';
 import './index.css';
@@ -81,6 +82,41 @@ const findBatch = (info, batchId) => (info?.batches || []).find(b => String(b._i
 // Find a class object by name (classes are keyed by name)
 const findClass = (info, name) => (info?.classes || []).find(c => c.name === name);
 
+// Compute age in whole years from a YYYY-MM-DD birthday string
+const ageFromDOB = (dob) => {
+  if (!dob) return null;
+  const [y, m, d] = String(dob).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const mDiff = (today.getMonth() + 1) - m;
+  if (mDiff < 0 || (mDiff === 0 && today.getDate() < d)) age--;
+  return age >= 0 && age < 150 ? age : null;
+};
+
+// Days until next birthday (0..364, or null)
+const daysUntilBirthday = (dob) => {
+  if (!dob) return null;
+  const [_, m, d] = String(dob).split('-').map(Number);
+  if (!m || !d) return null;
+  const now = new Date();
+  const target = new Date(now.getFullYear(), m - 1, d);
+  if (target < new Date(now.getFullYear(), now.getMonth(), now.getDate())) target.setFullYear(now.getFullYear() + 1);
+  return Math.round((target - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+};
+
+// Aadhar Verhoeff checksum (client-side validation for instant feedback)
+const VERHOEFF_D = [[0,1,2,3,4,5,6,7,8,9],[1,2,3,4,0,6,7,8,9,5],[2,3,4,0,1,7,8,9,5,6],[3,4,0,1,2,8,9,5,6,7],[4,0,1,2,3,9,5,6,7,8],[5,9,8,7,6,0,4,3,2,1],[6,5,9,8,7,1,0,4,3,2],[7,6,5,9,8,2,1,0,4,3],[8,7,6,5,9,3,2,1,0,4],[9,8,7,6,5,4,3,2,1,0]];
+const VERHOEFF_P = [[0,1,2,3,4,5,6,7,8,9],[1,5,7,6,2,8,3,0,9,4],[5,8,0,3,7,9,6,1,4,2],[8,9,1,6,0,4,3,5,2,7],[9,4,5,3,1,2,6,8,7,0],[4,2,8,6,5,7,3,9,0,1],[2,7,9,3,8,0,6,4,1,5],[7,0,4,6,9,1,3,2,5,8]];
+const isValidAadhar = (s) => {
+  const d = (s || '').replace(/\s/g, '');
+  if (!/^\d{12}$/.test(d)) return false;
+  let c = 0;
+  const rev = d.split('').reverse();
+  for (let i = 0; i < rev.length; i++) c = VERHOEFF_D[c][VERHOEFF_P[i % 8][parseInt(rev[i], 10)]];
+  return c === 0;
+};
+
 // ============================
 // MAIN APP
 // ============================
@@ -115,8 +151,7 @@ export default function App() {
     const savedStudent = JSON.parse(localStorage.getItem('selectedStudent') || 'null');
     if (savedRole === 'teacher') setView('teacher');
     else if (savedRole === 'parent' && savedStudent) setView('parent');
-    // legacy 'student' role: clear it; that flow no longer exists
-    else if (savedRole === 'student') { localStorage.clear(); }
+    else if (savedRole === 'student' && savedStudent) setView('student');
   }, [refreshInfo]);
 
   useEffect(() => {
@@ -133,20 +168,27 @@ export default function App() {
     refreshInfo();
   };
 
-  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} onParentLogin={() => setView('parent-login')} />;
+  if (view === 'landing') return <Landing info={info} onSignIn={() => setView('login')} onRegister={() => setView('register')} onStudentLogin={() => setView('student-login')} />;
   if (view === 'register') return <Register info={info} onBack={() => setView('landing')} onDone={() => setView('login')} />;
-  if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(r) => {
-    setRole(r); refreshInfo();
-    setView('teacher');
+  if (view === 'login') return <Login info={info} onBack={() => setView('landing')} onLogin={(role, student) => {
+    setRole(role); refreshInfo();
+    if (role === 'parent' && student) {
+      setSelectedStudent(student);
+      localStorage.setItem('selectedStudent', JSON.stringify(student));
+      setView('parent');
+    } else {
+      setView('teacher');
+    }
   }} />;
-  if (view === 'parent-login') return <ParentLogin info={info} onBack={() => setView('landing')} onLogin={(student) => {
-    setRole('parent'); setSelectedStudent(student);
+  if (view === 'student-login') return <StudentLogin info={info} onBack={() => setView('landing')} onLogin={(student) => {
+    setRole('student'); setSelectedStudent(student);
     localStorage.setItem('selectedStudent', JSON.stringify(student));
     refreshInfo();
-    setView('parent');
+    setView('student');
   }} />;
   if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} refreshInfo={refreshInfo} />;
   if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
+  if (view === 'student') return <StudentChatDashboard student={selectedStudent} info={info} onSignOut={handleSignOut} />;
   return null;
 }
 
@@ -170,7 +212,7 @@ function OffDayBanner({ announcements, batchId }) {
 // ============================
 // LANDING
 // ============================
-function Landing({ info, onSignIn, onRegister, onParentLogin }) {
+function Landing({ info, onSignIn, onRegister, onStudentLogin }) {
   return (
     <div className="page">
       <header className="header">
@@ -187,14 +229,14 @@ function Landing({ info, onSignIn, onRegister, onParentLogin }) {
       </header>
 
       <section className="hero">
-        <h1 className="display">Smart Attendance for {info.classroomName || 'Your Coaching Center'}</h1>
-        <p>Students check in with one tap. Parents see real-time updates. Teachers manage everything from one dashboard.</p>
+        <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
+        <p>One sign-in for everyone. Teachers use their password, parents use their unique code — same place.</p>
         <div className="hero-buttons">
           <button className="btn btn-primary btn-lg" onClick={onSignIn}>
-            <LogIn size={18} /> Teacher Sign In
+            <LogIn size={18} /> Sign In
           </button>
-          <button className="btn btn-secondary btn-lg" onClick={onParentLogin}>
-            <KeyRound size={18} /> Parent Login with Code
+          <button className="btn btn-secondary btn-lg" onClick={onStudentLogin}>
+            <MessageCircle size={18} /> Student Chat (Roll Number)
           </button>
           <button className="btn btn-outline btn-lg" onClick={onRegister}>
             <UserPlus size={18} /> Register as New Student
@@ -207,18 +249,18 @@ function Landing({ info, onSignIn, onRegister, onParentLogin }) {
         <div className="feature-grid">
           <div className="card">
             <CheckCircle size={32} color="#16a34a" />
-            <h3>Students Check In</h3>
-            <p>The teacher hands the device over and the student taps their own name. No password to remember, no way to mark yourself absent.</p>
+            <h3>Mark Attendance</h3>
+            <p>The teacher hands the device over and the student taps their own name. Optional note when checking in.</p>
           </div>
           <div className="card">
             <BarChart3 size={32} color="#d97706" />
-            <h3>Parents Track Progress</h3>
-            <p>Each parent gets a unique code and sees only their own child's data. Stay logged in until you tap log out.</p>
+            <h3>Parents Stay Updated</h3>
+            <p>Each parent gets a unique code and sees only their own child. Stay logged in until you tap log out.</p>
           </div>
           <div className="card">
-            <Settings size={32} color="#dc2626" />
-            <h3>Teacher Controls Everything</h3>
-            <p>Classes with their own monthly fees, batches with their own timings, holidays, announcements, WhatsApp sharing — all in one place.</p>
+            <MessageCircle size={32} color="#9333ea" />
+            <h3>Group Chat & AI Help</h3>
+            <p>Students can chat with each other (teacher watches). Everyone gets an AI assistant that knows the data they're allowed to see.</p>
           </div>
         </div>
       </section>
@@ -245,7 +287,7 @@ function Landing({ info, onSignIn, onRegister, onParentLogin }) {
 }
 
 // ============================
-// LOGIN (teacher only — parents use code, students use teacher's device)
+// UNIFIED LOGIN: one field accepts teacher password OR parent code
 // ============================
 function Login({ info, onBack, onLogin }) {
   const [password, setPassword] = useState('');
@@ -260,7 +302,7 @@ function Login({ info, onBack, onLogin }) {
       const res = await api.post('/auth/login', { password });
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('role', res.data.role);
-      onLogin(res.data.role, []);
+      onLogin(res.data.role, res.data.student || null);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
     } finally { setLoading(false); }
@@ -270,45 +312,32 @@ function Login({ info, onBack, onLogin }) {
     <div className="page-center">
       <div className="container-narrow">
         <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
-        <div className="auth-grid">
-          <div>
-            <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
-            <p className="muted">Teacher sign-in.</p>
-            <div className="role-card role-teacher">
-              <h3>🎓 Teacher</h3>
-              <p>Use your teacher password to manage everything.</p>
-            </div>
-            <div className="role-card role-parent">
-              <h3>👨‍👩‍👧 Parent?</h3>
-              <p>Parents log in with a <strong>unique code</strong> from the teacher. <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Go back</a> and tap "Parent Login with Code".</p>
-            </div>
-            <div className="role-card role-student">
-              <h3>📚 Student?</h3>
-              <p>Students mark themselves present on the teacher's device — no login needed.</p>
-            </div>
-          </div>
-          <div className="auth-form">
-            <h2 className="display">Teacher Sign In</h2>
-            <form onSubmit={submit}>
-              <label>PASSWORD</label>
-              <div className="password-field">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Enter password"
-                  autoFocus
-                />
-                <button type="button" className="icon-btn" onClick={() => setShowPassword(!showPassword)}>
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              {error && <div className="error-box">{error}</div>}
-              <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
-                {loading ? 'Signing in...' : 'Sign In'}
+        <div className="auth-form" style={{ maxWidth: 460, margin: '0 auto' }}>
+          <h1 className="display">{info.classroomName || 'Coaching Center'}</h1>
+          <p className="muted">Enter your <strong>teacher password</strong> or your <strong>parent code</strong>. Same field, the system figures it out.</p>
+          <form onSubmit={submit}>
+            <label>PASSWORD OR PARENT CODE</label>
+            <div className="password-field">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Password or code (e.g. K7842M)"
+                autoFocus
+              />
+              <button type="button" className="icon-btn" onClick={() => setShowPassword(!showPassword)}>
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
-            </form>
-          </div>
+            </div>
+            {error && <div className="error-box">{error}</div>}
+            <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
+              {loading ? 'Signing in...' : 'Sign In'}
+            </button>
+          </form>
+          <hr />
+          <p className="text-center small muted">
+            Parent code format: a letter, the last 4 digits of your phone, then another letter. Like <strong>K7842M</strong>. Ask {info.teacherName || 'the teacher'} if you don't have one.
+          </p>
         </div>
       </div>
     </div>
@@ -316,10 +345,10 @@ function Login({ info, onBack, onLogin }) {
 }
 
 // ============================
-// PARENT LOGIN (code only) — feature #13
+// STUDENT LOGIN (roll number only) — for chat + complaints (requests #14, #16)
 // ============================
-function ParentLogin({ info, onBack, onLogin }) {
-  const [code, setCode] = useState('');
+function StudentLogin({ info, onBack, onLogin }) {
+  const [roll, setRoll] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -327,12 +356,12 @@ function ParentLogin({ info, onBack, onLogin }) {
     if (e) e.preventDefault();
     setLoading(true); setError('');
     try {
-      const res = await api.post('/auth/parent-login', { code: code.toUpperCase().trim() });
+      const res = await api.post('/auth/student-login', { rollNumber: roll.trim() });
       localStorage.setItem('token', res.data.token);
-      localStorage.setItem('role', 'parent');
+      localStorage.setItem('role', 'student');
       onLogin(res.data.student);
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid code');
+      setError(err.response?.data?.error || 'Could not log in');
     } finally { setLoading(false); }
   };
 
@@ -340,27 +369,26 @@ function ParentLogin({ info, onBack, onLogin }) {
     <div className="page-center">
       <div className="container-narrow">
         <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
-        <div className="auth-form" style={{ maxWidth: 480, margin: '0 auto' }}>
-          <h1 className="display"><KeyRound size={22} /> Parent Login</h1>
-          <p className="muted">Enter the unique code your teacher gave you. You'll see your child's attendance and fees only — no other children.</p>
+        <div className="auth-form" style={{ maxWidth: 460, margin: '0 auto' }}>
+          <h1 className="display"><MessageCircle size={22} /> Student Sign In</h1>
+          <p className="muted">Enter your roll number to access group chat, complaint inbox, and the AI assistant.</p>
           <form onSubmit={submit}>
-            <label>Parent Code</label>
+            <label>Roll Number</label>
             <input
-              value={code}
-              onChange={e => setCode(e.target.value.toUpperCase())}
-              placeholder="e.g. AB23CD"
-              maxLength={10}
+              value={roll}
+              onChange={e => setRoll(e.target.value)}
+              placeholder="e.g. 003"
               autoFocus
-              style={{ fontSize: 20, letterSpacing: 4, textAlign: 'center', textTransform: 'uppercase' }}
+              style={{ fontSize: 22, letterSpacing: 4, textAlign: 'center' }}
             />
             {error && <div className="error-box">{error}</div>}
-            <button type="submit" className="btn btn-primary btn-block" disabled={loading || !code}>
-              {loading ? 'Checking...' : 'View My Child'}
+            <button type="submit" className="btn btn-primary btn-block" disabled={loading || !roll}>
+              {loading ? 'Checking...' : 'Continue'}
             </button>
           </form>
           <hr />
           <p className="text-center small muted">
-            Don't have a code? Ask {info.teacherName || 'the teacher'} for it.
+            Don't know your roll number? Check with {info.teacherName || 'your teacher'}.
           </p>
         </div>
       </div>
@@ -374,7 +402,8 @@ function ParentLogin({ info, onBack, onLogin }) {
 function Register({ info, onBack, onDone }) {
   const [form, setForm] = useState({
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', birthday: '', subjects: [], notes: ''
+    aadhar: '', birthday: '', subjects: [], notes: '',
+    className: '', batchId: '', photo: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -388,13 +417,15 @@ function Register({ info, onBack, onDone }) {
     }));
   };
 
-  const validateAadhar = (a) => !a || /^\d{12}$/.test(a.replace(/\s/g, ''));
-
   const submit = async (e) => {
     e.preventDefault();
     setError('');
     if (!form.name || !form.phone) { setError('Name and phone are required'); return; }
-    if (!validateAadhar(form.aadhar)) { setError('Aadhar must be 12 digits'); return; }
+    // Strict Aadhar checksum if provided (request #4)
+    if (form.aadhar && !isValidAadhar(form.aadhar)) {
+      setError('Aadhar number is invalid. Please check the 12 digits.');
+      return;
+    }
     setLoading(true);
     try {
       const r = await api.post('/public/register', form);
@@ -411,16 +442,15 @@ function Register({ info, onBack, onDone }) {
         <div className="container-narrow">
           <div className="success-box">
             <CheckCircle size={48} color="#16a34a" />
-            <h2 className="display">Welcome, {form.name}!</h2>
-            <p>You're now registered at {info.classroomName || 'our coaching center'}.</p>
-            <p className="muted">Ask your teacher for the student password to log in.</p>
+            <h2 className="display">Thanks, {form.name}!</h2>
+            <p>Your registration is in. The teacher will review and approve it before you can be marked present.</p>
             {createdStudent?.parentCode && (
               <div className="code-box" style={{ marginTop: 16 }}>
                 <span className="muted small">Parent code (give this to your parent):</span>
                 <strong>{createdStudent.parentCode}</strong>
               </div>
             )}
-            <button className="btn btn-primary btn-lg" onClick={onDone}>Go to Sign In</button>
+            <button className="btn btn-primary btn-lg" onClick={onDone}>Back to Sign In</button>
           </div>
         </div>
       </div>
@@ -429,6 +459,8 @@ function Register({ info, onBack, onDone }) {
 
   const availableSubjects = (info.subjects || []).map(getSubjectName).filter(Boolean);
   const fallback = availableSubjects.length ? availableSubjects : ['Mathematics', 'Science', 'English'];
+  const age = ageFromDOB(form.birthday);
+  const aadharValid = form.aadhar ? isValidAadhar(form.aadhar) : null;
 
   return (
     <div className="page-center">
@@ -436,15 +468,17 @@ function Register({ info, onBack, onDone }) {
         <button className="btn-back" onClick={onBack}><ArrowLeft size={16} /> Back</button>
         <div className="auth-form">
           <h1 className="display">Register as New Student</h1>
-          <p className="muted">Fill in your details to join {info.classroomName || 'our coaching center'}</p>
+          <p className="muted">Fill in your details to join {info.classroomName || 'our coaching center'}. The teacher will approve before you can mark attendance.</p>
           <form onSubmit={submit}>
+            <PhotoCapture value={form.photo} onChange={(p) => setForm(f => ({ ...f, photo: p }))} />
+
             <label>Student Name *</label>
             <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Your full name" required />
 
             <label>Phone Number *</label>
             <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder="10-digit phone number" required />
 
-            <label>Date of Birth</label>
+            <label>Date of Birth {age != null && <span className="age-tag">Age {age}</span>}</label>
             <input type="date" value={form.birthday} onChange={e => setForm({...form, birthday: e.target.value})} />
 
             <label>Parent / Guardian Name</label>
@@ -453,8 +487,20 @@ function Register({ info, onBack, onDone }) {
             <label>Parent / Guardian Phone</label>
             <input value={form.parentPhone} onChange={e => setForm({...form, parentPhone: e.target.value})} placeholder="Parent's phone number" />
 
-            <label>Aadhar Number (optional)</label>
-            <input value={form.aadhar} onChange={e => setForm({...form, aadhar: e.target.value})} placeholder="12-digit Aadhar" maxLength={12} />
+            <label>Aadhar Number (optional) {aadharValid === true && <span className="badge green small"><Check size={12} /> valid</span>} {aadharValid === false && <span className="badge red small">invalid</span>}</label>
+            <input value={form.aadhar} onChange={e => setForm({...form, aadhar: e.target.value.replace(/\D/g, '').slice(0, 12)})} placeholder="12-digit Aadhar" maxLength={12} inputMode="numeric" />
+
+            {(info.classes?.length || 0) > 0 && (
+              <>
+                <label>Class</label>
+                <select value={form.className} onChange={e => setForm({...form, className: e.target.value})}>
+                  <option value="">— Choose your class —</option>
+                  {info.classes.map(c => (
+                    <option key={c.name} value={c.name}>{c.name} (₹{(c.monthlyFee || 0).toLocaleString('en-IN')}/month)</option>
+                  ))}
+                </select>
+              </>
+            )}
 
             <label>Subjects you want to learn</label>
             <div className="checkbox-group">
@@ -472,11 +518,117 @@ function Register({ info, onBack, onDone }) {
             {error && <div className="error-box">{error}</div>}
 
             <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
-              {loading ? 'Registering...' : 'Register'}
+              {loading ? 'Submitting...' : 'Submit Registration'}
             </button>
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================
+// PHOTO CAPTURE (request #9) — camera or file upload, base64
+// ============================
+function PhotoCapture({ value, onChange }) {
+  const [cameraOn, setCameraOn] = useState(false);
+  const [error, setError] = useState('');
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const startCamera = async () => {
+    setError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      streamRef.current = stream;
+      setCameraOn(true);
+      // Wait for state to apply, then bind
+      setTimeout(() => { if (videoRef.current) videoRef.current.srcObject = stream; }, 50);
+    } catch (err) {
+      setError("Couldn't open camera. Try uploading a photo instead.");
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setCameraOn(false);
+  };
+
+  const snap = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    const canvas = document.createElement('canvas');
+    // 400x400 square crop, centered
+    const size = Math.min(v.videoWidth, v.videoHeight) || 400;
+    canvas.width = 400; canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    const sx = (v.videoWidth - size) / 2;
+    const sy = (v.videoHeight - size) / 2;
+    ctx.drawImage(v, sx, sy, size, size, 0, 0, 400, 400);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    onChange(dataUrl);
+    stopCamera();
+  };
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setError('Max 5MB'); return; }
+    // Downscale to 400x400 to keep DB small
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = Math.min(img.width, img.height);
+        canvas.width = 400; canvas.height = 400;
+        const ctx = canvas.getContext('2d');
+        const sx = (img.width - size) / 2;
+        const sy = (img.height - size) / 2;
+        ctx.drawImage(img, sx, sy, size, size, 0, 0, 400, 400);
+        onChange(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  useEffect(() => () => stopCamera(), []); // cleanup on unmount
+
+  return (
+    <div className="photo-capture">
+      <label>Photo (optional)</label>
+      {error && <div className="error-box small">{error}</div>}
+      {value ? (
+        <div className="photo-preview">
+          <img src={value} alt="Student" />
+          <button type="button" className="btn btn-outline btn-mini" onClick={() => onChange('')}>
+            <Trash2 size={12} /> Remove
+          </button>
+        </div>
+      ) : cameraOn ? (
+        <div className="camera-view">
+          <video ref={videoRef} autoPlay playsInline muted />
+          <div className="row" style={{ justifyContent: 'center', marginTop: 8, gap: 8 }}>
+            <button type="button" className="btn btn-outline" onClick={stopCamera}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={snap}><Camera size={14} /> Capture</button>
+          </div>
+        </div>
+      ) : (
+        <div className="row" style={{ gap: 8 }}>
+          <button type="button" className="btn btn-outline" onClick={startCamera}>
+            <Camera size={14} /> Take Photo
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" capture="user" style={{ display: 'none' }} onChange={onFile} />
+          <button type="button" className="btn btn-outline" onClick={() => fileRef.current?.click()}>
+            Upload
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -541,6 +693,26 @@ function PickStudent({ students, role, onPick, onBack }) {
 // ============================
 function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
   const [tab, setTab] = useState('today');
+  const [unreadMsgs, setUnreadMsgs] = useState(0);
+  const [unreadComplaints, setUnreadComplaints] = useState(0);
+
+  // Poll unread counts every 30s for badges
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        const [m, c] = await Promise.all([
+          api.get('/parent-messages/unread-count'),
+          api.get('/complaints/unread-count'),
+        ]);
+        setUnreadMsgs(m.data.unread || 0);
+        setUnreadComplaints(c.data.unread || 0);
+      } catch {}
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="page">
       <header className="dashboard-header">
@@ -548,7 +720,10 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
           <h1 className="display">Teacher Dashboard</h1>
           <p className="muted">Welcome back, {info.teacherName || 'Teacher'}</p>
         </div>
-        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
+        <div className="row">
+          <button className="btn btn-outline btn-mini" onClick={refreshInfo} title="Refresh"><RefreshCw size={14} /></button>
+          <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
+        </div>
       </header>
 
       <OffDayBanner announcements={announcements} />
@@ -559,6 +734,15 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
         <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
         <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Announcements</button>
+        <button className={tab === 'chat' ? 'tab active' : 'tab'} onClick={() => setTab('chat')}><MessageCircle size={16} /> Chat</button>
+        <button className={tab === 'messages' ? 'tab active' : 'tab'} onClick={() => setTab('messages')}>
+          <Inbox size={16} /> Parents
+          {unreadMsgs > 0 && <span className="tab-badge">{unreadMsgs}</span>}
+        </button>
+        <button className={tab === 'complaints' ? 'tab active' : 'tab'} onClick={() => setTab('complaints')}>
+          <AlertCircle size={16} /> Complaints
+          {unreadComplaints > 0 && <span className="tab-badge red">{unreadComplaints}</span>}
+        </button>
         <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}><Settings size={16} /> Settings</button>
       </nav>
 
@@ -568,8 +752,13 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
         {tab === 'summary' && <SummaryTab info={info} />}
         {tab === 'fees' && <FeesTab info={info} />}
         {tab === 'announcements' && <AnnouncementsTab info={info} />}
+        {tab === 'chat' && <GroupChat role="teacher" currentName={info.teacherName || 'Teacher'} />}
+        {tab === 'messages' && <ParentMessagesInbox onUpdate={setUnreadMsgs} />}
+        {tab === 'complaints' && <ComplaintsInbox onUpdate={setUnreadComplaints} />}
         {tab === 'settings' && <SettingsTab info={info} refreshInfo={refreshInfo} />}
       </main>
+
+      <AIAssistant />
     </div>
   );
 }
@@ -580,6 +769,7 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
 function StudentModePicker({ students, todayAtt, onCancel, onMarked }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState(null);
+  const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const markedIds = new Set(todayAtt.map(a => String(a.studentId)));
@@ -593,8 +783,7 @@ function StudentModePicker({ students, todayAtt, onCancel, onMarked }) {
     if (!picked) return;
     setSubmitting(true);
     try {
-      // Student-side check-in (markedBy = 'self')
-      await api.post('/attendance/self-mark', { studentId: picked._id });
+      await api.post('/attendance/self-mark', { studentId: picked._id, note: note.trim() || undefined });
       onMarked(picked.name);
     } catch (err) {
       alert('Could not mark: ' + (err.response?.data?.error || err.message));
@@ -607,11 +796,19 @@ function StudentModePicker({ students, todayAtt, onCancel, onMarked }) {
       <div className="student-mode">
         <h2 className="display">Is this you?</h2>
         <div className="picked-card">
+          {picked.photo && <img src={picked.photo} alt={picked.name} className="picked-photo" />}
           <div className="picked-name">{picked.name}</div>
           <div className="muted">Roll #{picked.rollNumber}</div>
         </div>
-        <div className="row" style={{ gap: 12, marginTop: 24 }}>
-          <button className="btn btn-outline btn-lg" onClick={() => setPicked(null)} disabled={submitting}>Not me</button>
+        <label style={{ marginTop: 18 }}>Want to leave a note? (optional)</label>
+        <textarea
+          value={note}
+          onChange={e => setNote(e.target.value.slice(0, 300))}
+          rows={2}
+          placeholder="e.g. running late, came in for makeup, etc."
+        />
+        <div className="row" style={{ gap: 12, marginTop: 12 }}>
+          <button className="btn btn-outline btn-lg" onClick={() => { setPicked(null); setNote(''); }} disabled={submitting}>Not me</button>
           <button className="btn btn-primary btn-lg" onClick={confirm} disabled={submitting}>
             {submitting ? 'Marking...' : 'Yes, mark me present'}
           </button>
@@ -639,6 +836,7 @@ function StudentModePicker({ students, todayAtt, onCancel, onMarked }) {
         <div className="student-mode-list">
           {filtered.map(s => (
             <button key={s._id} className="student-mode-tile" onClick={() => setPicked(s)}>
+              {s.photo ? <img src={s.photo} alt="" className="tile-photo" /> : <div className="tile-photo placeholder"><User size={20} /></div>}
               <strong>{s.name}</strong>
               <span className="muted small">Roll #{s.rollNumber}</span>
             </button>
@@ -745,6 +943,10 @@ function TodayTab({ info, announcements }) {
 
   const visible = batchFilter ? students.filter(s => s.batchId === batchFilter) : students;
   const birthdayStudents = visible.filter(s => isBirthdayToday(s.birthday));
+  const upcomingBirthdays = visible
+    .map(s => ({ s, d: daysUntilBirthday(s.birthday) }))
+    .filter(x => x.d != null && x.d > 0 && x.d <= 7)
+    .sort((a, b) => a.d - b.d);
   const offDay = isOffDayToday(announcements);
 
   if (students.length === 0) return (
@@ -766,6 +968,28 @@ function TodayTab({ info, announcements }) {
           <div>
             <strong>🎉 Today's Birthday{birthdayStudents.length > 1 ? 's' : ''}!</strong>
             <p>{birthdayStudents.map(s => s.name).join(', ')} — wish them a happy birthday!</p>
+          </div>
+        </div>
+      )}
+
+      {upcomingBirthdays.length > 0 && (
+        <div className="upcoming-birthdays">
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+            <Cake size={16} color="#d97706" />
+            <strong>Coming up this week</strong>
+          </div>
+          <div className="upcoming-list">
+            {upcomingBirthdays.map(({ s, d }) => (
+              <span key={s._id} className="upcoming-chip">
+                <strong>{s.name}</strong>
+                <span className="muted small">{d === 1 ? 'tomorrow' : `in ${d} days`}{s.parentPhone ? '' : ''}</span>
+                {s.parentPhone && (
+                  <a className="wa-link" href={whatsappLink(s.parentPhone, `Wishing ${s.name} a very happy birthday in advance from ${info.teacherName || info.classroomName || 'us'}! 🎂`)} target="_blank" rel="noreferrer">
+                    <MessageCircle size={12} /> wish
+                  </a>
+                )}
+              </span>
+            ))}
           </div>
         </div>
       )}
@@ -863,6 +1087,7 @@ function TodayTab({ info, announcements }) {
 // ============================
 function StudentsTab({ info, refreshInfo }) {
   const [students, setStudents] = useState([]);
+  const [pending, setPending] = useState([]);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
@@ -874,8 +1099,9 @@ function StudentsTab({ info, refreshInfo }) {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await api.get('/students');
-      setStudents(r.data);
+      const [a, p] = await Promise.all([api.get('/students'), api.get('/students/pending')]);
+      setStudents(a.data);
+      setPending(p.data);
     } finally { setLoading(false); }
   };
 
@@ -887,9 +1113,14 @@ function StudentsTab({ info, refreshInfo }) {
     load();
   };
 
-  const regenerateCode = async (id) => {
-    if (!confirm('Generate a new parent code? The old code will stop working immediately.')) return;
-    await api.post('/students/' + id + '/regenerate-code');
+  const approve = async (id) => {
+    await api.post('/students/' + id + '/approve');
+    load();
+  };
+
+  const reject = async (id) => {
+    if (!confirm('Reject this registration? The student will be deleted.')) return;
+    await api.delete('/students/' + id);
     load();
   };
 
@@ -909,6 +1140,32 @@ function StudentsTab({ info, refreshInfo }) {
 
   return (
     <div>
+      {pending.length > 0 && (
+        <div className="pending-section">
+          <h3><AlertCircle size={16} /> {pending.length} registration{pending.length > 1 ? 's' : ''} awaiting your approval</h3>
+          <div className="list">
+            {pending.map(s => (
+              <div key={s._id} className="student-card pending-card">
+                <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
+                  {s.photo && <img src={s.photo} alt={s.name} className="student-avatar" />}
+                  <div style={{ flex: 1 }}>
+                    <strong>{s.name}</strong>
+                    {ageFromDOB(s.birthday) != null && <span className="age-tag">Age {ageFromDOB(s.birthday)}</span>}
+                    <p className="muted small">{s.phone || 'No phone'} · {s.className || 'No class'} · {s.subjects?.join(', ') || 'No subjects'}</p>
+                    {s.parentName && <p className="small">Parent: {s.parentName} · {s.parentPhone}</p>}
+                    {s.notes && <p className="small muted">"{s.notes}"</p>}
+                  </div>
+                </div>
+                <div className="row-buttons">
+                  <button className="btn btn-green btn-mini" onClick={() => approve(s._id)}><Check size={14} /> Approve</button>
+                  <button className="btn btn-outline btn-mini" onClick={() => reject(s._id)}><X size={14} /> Reject</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="toolbar">
         <div className="search-bar">
           <Search size={16} />
@@ -924,6 +1181,7 @@ function StudentsTab({ info, refreshInfo }) {
           <option value="name">Sort by Name</option>
           <option value="roll">Sort by Roll #</option>
         </select>
+        <button className="btn btn-outline btn-mini" onClick={load} title="Refresh"><RefreshCw size={14} /></button>
         <button className="btn btn-primary" onClick={() => setAdding(true)}>
           <Plus size={16} /> Add Student
         </button>
@@ -940,29 +1198,35 @@ function StudentsTab({ info, refreshInfo }) {
       <div className="list">
         {filtered.map(s => {
           const batch = findBatch(info, s.batchId);
+          const age = ageFromDOB(s.birthday);
           return (
             <div key={s._id} className="student-card">
-              <div>
-                <strong>{s.name}</strong>
-                {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂</span>}
-                <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
-                {batch && <p className="small"><Layers size={12} /> Batch: <strong>{batch.name}</strong> ({batch.startTime}-{batch.endTime})</p>}
-                {s.subjects?.length > 0 && <p className="small">Subjects: {s.subjects.join(', ')}</p>}
-                {s.parentCode && (
-                  <p className="small">
-                    Parent code: <code className="inline-code">{s.parentCode}</code>{' '}
-                    <button className="btn-link" onClick={() => setShowCodeFor(s)}>Show / share</button>
-                  </p>
-                )}
-                {s.parentPhone && (
-                  <p className="small">
-                    Parent: {s.parentName || ''} ·{' '}
-                    <a href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
-                      <MessageCircle size={12} /> WhatsApp
-                    </a>
-                  </p>
-                )}
-                {s.registeredVia === 'self' && <span className="badge blue small">Self-registered</span>}
+              <div className="row" style={{ gap: 12, alignItems: 'flex-start', flex: 1 }}>
+                {s.photo ? <img src={s.photo} alt={s.name} className="student-avatar" /> : <div className="student-avatar placeholder"><User size={20} /></div>}
+                <div style={{ flex: 1 }}>
+                  <strong>{s.name}</strong>
+                  {isBirthdayToday(s.birthday) && <span className="bday-pill">🎂</span>}
+                  {age != null && <span className="age-tag">Age {age}</span>}
+                  <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
+                  {s.className && <p className="small">Class: <strong>{s.className}</strong></p>}
+                  {batch && <p className="small"><Layers size={12} /> Batch: <strong>{batch.name}</strong> ({batch.startTime}-{batch.endTime})</p>}
+                  {s.subjects?.length > 0 && <p className="small">Subjects: {s.subjects.join(', ')}</p>}
+                  {s.parentCode && (
+                    <p className="small">
+                      Parent code: <code className="inline-code">{s.parentCode}</code>{' '}
+                      <button className="btn-link" onClick={() => setShowCodeFor(s)}>Show / share</button>
+                    </p>
+                  )}
+                  {s.parentPhone && (
+                    <p className="small">
+                      Parent: {s.parentName || ''} ·{' '}
+                      <a href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
+                        <MessageCircle size={12} /> WhatsApp
+                      </a>
+                    </p>
+                  )}
+                  {s.registeredVia === 'self' && <span className="badge blue small">Self-registered</span>}
+                </div>
               </div>
               <div className="row-buttons">
                 <button className="icon-btn" onClick={() => setEditing(s)} title="Edit"><Edit2 size={16} /></button>
@@ -986,7 +1250,7 @@ function StudentsTab({ info, refreshInfo }) {
       {showCodeFor && (
         <Modal onClose={() => setShowCodeFor(null)} title={`Parent code for ${showCodeFor.name}`}>
           <div className="code-display">
-            <div className="muted small">Give this code to the parent. Tapping the WhatsApp button below sends it for you.</div>
+            <div className="muted small">The code is fixed (it won't change). It includes the last 4 digits of the parent's phone so it's easy to remember.</div>
             <div className="code-big">{showCodeFor.parentCode}</div>
             <div className="row-buttons" style={{ justifyContent: 'center', marginTop: 12 }}>
               <button className="btn btn-outline btn-mini" onClick={() => navigator.clipboard?.writeText(showCodeFor.parentCode)}>
@@ -997,16 +1261,13 @@ function StudentsTab({ info, refreshInfo }) {
                   className="btn btn-whatsapp btn-mini"
                   href={whatsappLink(
                     showCodeFor.parentPhone,
-                    `Hello! This is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'}.\n\nUse this code to view ${showCodeFor.name}'s attendance and fees:\n\n*${showCodeFor.parentCode}*\n\nOpen the website, tap "Parent Login with Code", and enter this code.`
+                    `Hello! This is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'}.\n\nUse this code to view ${showCodeFor.name}'s attendance and fees:\n\n*${showCodeFor.parentCode}*\n\nOpen the website, tap "Sign In", and enter this code.`
                   )}
                   target="_blank" rel="noreferrer"
                 >
                   <MessageCircle size={14} /> Send via WhatsApp
                 </a>
               )}
-              <button className="btn btn-outline btn-mini" onClick={() => { regenerateCode(showCodeFor._id); setShowCodeFor(null); }}>
-                <RotateCcw size={14} /> Regenerate
-              </button>
             </div>
           </div>
         </Modal>
@@ -1016,12 +1277,12 @@ function StudentsTab({ info, refreshInfo }) {
 }
 
 function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
-  // Make sure we always see the latest subjects/batches when this form opens (feature #12).
+  // Always see the latest classes/subjects/batches when this opens
   useEffect(() => { if (refreshInfo) refreshInfo(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [form, setForm] = useState(student || {
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: ''
+    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: '', photo: ''
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1036,41 +1297,45 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
   const save = async () => {
     setError('');
     if (!form.name) { setError('Name is required'); return; }
-    if (form.aadhar && !/^\d{12}$/.test(form.aadhar.replace(/\s/g, ''))) {
-      setError('Aadhar must be 12 digits'); return;
+    if (form.aadhar && !isValidAadhar(form.aadhar)) {
+      setError('Aadhar number failed checksum — please double-check the 12 digits.'); return;
     }
     setSaving(true);
     try {
-      if (student) {
-        await api.put('/students/' + student._id, form);
-      } else {
-        await api.post('/students', form);
-      }
+      if (student) await api.put('/students/' + student._id, form);
+      else          await api.post('/students', form);
       onSaved();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save');
     } finally { setSaving(false); }
   };
 
-  // Feature #5 + #12: always pull subjects from the latest info; fall back gracefully.
   const subjectOptions = ((info.subjects && info.subjects.length) ? info.subjects.map(getSubjectName) : ['Mathematics', 'Science', 'English']).filter(Boolean);
+  const age = ageFromDOB(form.birthday);
+  const aadharValid = form.aadhar ? isValidAadhar(form.aadhar) : null;
 
   return (
     <Modal onClose={onClose} title={student ? 'Edit Student' : 'Add New Student'}>
+      <PhotoCapture value={form.photo || ''} onChange={(p) => setForm(f => ({ ...f, photo: p }))} />
+
       <label>Name *</label>
       <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} autoFocus />
       <label>Phone</label>
       <input value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
-      <label>Date of Birth</label>
+      <label>Date of Birth {age != null && <span className="age-tag">Age {age}</span>}</label>
       <input type="date" value={form.birthday || ''} onChange={e => setForm({...form, birthday: e.target.value})} />
       <label>Parent Name</label>
       <input value={form.parentName || ''} onChange={e => setForm({...form, parentName: e.target.value})} />
       <label>Parent Phone</label>
       <input value={form.parentPhone || ''} onChange={e => setForm({...form, parentPhone: e.target.value})} />
-      <label>Aadhar (12 digits)</label>
-      <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value})} maxLength={12} />
+      <label>
+        Aadhar (12 digits)
+        {aadharValid === true && <span className="badge green small"><Check size={12} /> valid</span>}
+        {aadharValid === false && <span className="badge red small">invalid</span>}
+      </label>
+      <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value.replace(/\D/g, '').slice(0, 12)})} maxLength={12} inputMode="numeric" />
 
-      {/* Class - determines monthly fee */}
+      {/* Class (request #9) - determines monthly fee */}
       <label>Class</label>
       {(info.classes?.length || 0) === 0 ? (
         <p className="small muted">No classes yet — add some in Settings → Classes.</p>
@@ -1083,7 +1348,6 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
         </select>
       )}
 
-      {/* Batch */}
       <label>Batch</label>
       {(info.batches?.length || 0) === 0 ? (
         <p className="small muted">No batches yet — add some in Settings → Batches.</p>
@@ -1128,6 +1392,7 @@ function SummaryTab({ info }) {
   const [selected, setSelected] = useState(null);
   const [summary, setSummary] = useState(null);
   const [history, setHistory] = useState([]);
+  const [studentFees, setStudentFees] = useState(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [monthFilter, setMonthFilter] = useState('');
@@ -1151,12 +1416,15 @@ function SummaryTab({ info }) {
 
   const loadStudent = async (s) => {
     setSelected(s);
-    const [summ, hist] = await Promise.all([
+    setSummary(null); setHistory([]); setStudentFees(null);
+    const [summ, hist, fees] = await Promise.all([
       api.get('/attendance/summary/' + s._id),
       api.get('/attendance/student/' + s._id),
+      api.get('/fees/student/' + s._id).catch(() => ({ data: null })),
     ]);
     setSummary(summ.data);
     setHistory(hist.data);
+    setStudentFees(fees.data);
   };
 
   if (loading) return <p className="muted">Loading...</p>;
@@ -1249,10 +1517,15 @@ function SummaryTab({ info }) {
             </div>
           ) : (
             <>
-              <div className="row" style={{justifyContent: 'space-between', flexWrap: 'wrap'}}>
-                <div>
-                  <h2 className="display">{selected.name}</h2>
-                  <p className="muted">Roll #{selected.rollNumber}{selected.subjects?.length ? ' · ' + selected.subjects.join(', ') : ''}</p>
+              <div className="row" style={{justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'flex-start'}}>
+                <div className="row" style={{ gap: 14, alignItems: 'center' }}>
+                  {selected.photo
+                    ? <img src={selected.photo} alt={selected.name} className="detail-avatar" />
+                    : <div className="detail-avatar placeholder"><User size={28} /></div>}
+                  <div>
+                    <h2 className="display" style={{ marginBottom: 4 }}>{selected.name}</h2>
+                    <p className="muted small" style={{ margin: 0 }}>Roll #{selected.rollNumber}{ageFromDOB(selected.birthday) != null ? ` · Age ${ageFromDOB(selected.birthday)}` : ''}</p>
+                  </div>
                 </div>
                 {selected.parentPhone && (
                   <button className="btn btn-whatsapp" onClick={shareWithParent}>
@@ -1261,11 +1534,41 @@ function SummaryTab({ info }) {
                 )}
               </div>
 
+              {/* Personal info card */}
+              <div className="info-card">
+                <h3>Personal info</h3>
+                <dl className="info-dl">
+                  {selected.phone && <><dt>Phone</dt><dd>{selected.phone}</dd></>}
+                  {selected.birthday && <><dt>Date of Birth</dt><dd>{selected.birthday}{ageFromDOB(selected.birthday) != null ? ` (Age ${ageFromDOB(selected.birthday)})` : ''}</dd></>}
+                  {selected.aadhar && <><dt>Aadhar</dt><dd>{selected.aadhar}</dd></>}
+                  {selected.parentName && <><dt>Parent</dt><dd>{selected.parentName}</dd></>}
+                  {selected.parentPhone && <><dt>Parent phone</dt><dd>{selected.parentPhone}</dd></>}
+                  {selected.parentCode && <><dt>Parent code</dt><dd><code className="inline-code">{selected.parentCode}</code></dd></>}
+                  {selected.className && <><dt>Class</dt><dd>{selected.className}</dd></>}
+                  {selected.batchId && findBatch(info, selected.batchId) && <><dt>Batch</dt><dd>{findBatch(info, selected.batchId).name} ({findBatch(info, selected.batchId).startTime}-{findBatch(info, selected.batchId).endTime})</dd></>}
+                  {selected.subjects?.length > 0 && <><dt>Subjects</dt><dd>{selected.subjects.join(', ')}</dd></>}
+                  {selected.enrollmentDate && <><dt>Enrolled</dt><dd>{selected.enrollmentDate}</dd></>}
+                  {selected.notes && <><dt>Notes</dt><dd>{selected.notes}</dd></>}
+                </dl>
+              </div>
+
               {summary && (
                 <div className="summary-stats">
                   <div className="stat-big green"><strong>{summary.present}</strong><span>Present</span></div>
                   <div className="stat-big red"><strong>{summary.absent}</strong><span>Absent</span></div>
                   <div className="stat-big blue"><strong>{summary.percentage}%</strong><span>Attendance</span></div>
+                </div>
+              )}
+
+              {studentFees?.fees && (
+                <div className="info-card">
+                  <h3><IndianRupee size={14} /> Fees ({studentFees.fees.year}-{String(studentFees.fees.month).padStart(2, '0')})</h3>
+                  <dl className="info-dl">
+                    <dt>Class</dt><dd>{studentFees.fees.className || '—'}</dd>
+                    <dt>Monthly fee</dt><dd>{formatRupee(studentFees.fees.monthlyFee || 0)}</dd>
+                    <dt>Working days</dt><dd>{studentFees.fees.workingDays} / {studentFees.fees.totalDays}</dd>
+                    <dt>Per working day</dt><dd>{formatRupee(Math.round(studentFees.fees.perDay || 0))}</dd>
+                  </dl>
                 </div>
               )}
 
@@ -1291,6 +1594,7 @@ function SummaryTab({ info }) {
                       ) : (
                         <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
                       )}
+                      {h.note && <p className="small muted" style={{ marginTop: 4 }}>"{h.note}"</p>}
                     </div>
                     {h.markedBy === 'teacher' && <span className="small muted">Marked by you</span>}
                     {h.markedBy === 'self' && <span className="small muted">Self-marked</span>}
@@ -2134,7 +2438,10 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
           <h1 className="display">{student?.name}'s Attendance</h1>
           <p className="muted">Roll #{student?.rollNumber}</p>
         </div>
-        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
+        <div className="row">
+          <button className="btn btn-outline btn-mini" onClick={load} title="Refresh"><RefreshCw size={14} /></button>
+          <button className="btn btn-outline" onClick={onSignOut}><LogOut size={16} /> Sign out</button>
+        </div>
       </header>
 
       <OffDayBanner announcements={announcements} batchId={student?.batchId} />
@@ -2144,6 +2451,7 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
         <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}><Calendar size={16} /> History</button>
         <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
         <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Updates</button>
+        <button className={tab === 'message' ? 'tab active' : 'tab'} onClick={() => setTab('message')}><MessageSquare size={16} /> Message Teacher</button>
         <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}><Info size={16} /> Class Info</button>
       </nav>
 
@@ -2266,8 +2574,11 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
         )}
 
         {tab === 'announcements' && <AnnouncementList announcements={announcements} info={info} />}
+        {tab === 'message' && <ParentMessageCompose />}
         {tab === 'info' && <ClassInfo info={info} student={student} />}
       </main>
+
+      <AIAssistant />
     </div>
   );
 }
@@ -2354,6 +2665,446 @@ function Modal({ title, children, onClose }) {
           <button className="icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ============================
+// v4: SHARED COMPONENTS
+// ============================
+
+// ----- AI ASSISTANT (request #15) -----
+function AIAssistant() {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, busy, open]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    setError('');
+    const newMsgs = [...messages, { role: 'user', content: text }];
+    setMessages(newMsgs);
+    setInput('');
+    setBusy(true);
+    try {
+      const r = await api.post('/ai/chat', { messages: newMsgs });
+      setMessages([...newMsgs, { role: 'assistant', content: r.data.reply }]);
+    } catch (err) {
+      setError(err.response?.data?.error || 'AI request failed');
+    } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return (
+      <button className="ai-fab" onClick={() => setOpen(true)} title="AI Assistant" aria-label="Open AI Assistant">
+        <Sparkles size={22} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="ai-panel">
+      <div className="ai-header">
+        <strong><Sparkles size={16} /> AI Assistant</strong>
+        <button className="icon-btn" onClick={() => setOpen(false)}><X size={16} /></button>
+      </div>
+      <div className="ai-body" ref={scrollRef}>
+        {messages.length === 0 && (
+          <p className="muted small">
+            Ask anything about your coaching center, attendance, fees, or general questions. I speak whatever language you write in.
+          </p>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={'ai-bubble ' + (m.role === 'user' ? 'me' : 'bot')}>
+            {m.content}
+          </div>
+        ))}
+        {busy && <div className="ai-bubble bot ai-typing">…</div>}
+        {error && <div className="error-box small">{error}</div>}
+      </div>
+      <div className="ai-input-row">
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Type your question…"
+          rows={1}
+        />
+        <button className="btn btn-primary" onClick={send} disabled={busy || !input.trim()}><Send size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+// ----- GROUP CHAT (request #14) -----
+function GroupChat({ role, currentName }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const scrollRef = useRef(null);
+  const lastTsRef = useRef(null);
+
+  const fetchInitial = async () => {
+    try {
+      const r = await api.get('/chat/messages');
+      setMessages(r.data.messages || []);
+      if (r.data.messages?.length) lastTsRef.current = r.data.messages[r.data.messages.length - 1].createdAt;
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not load chat');
+    }
+  };
+
+  const poll = async () => {
+    if (!lastTsRef.current) return;
+    try {
+      const r = await api.get('/chat/messages', { params: { since: lastTsRef.current } });
+      if (r.data.messages?.length) {
+        setMessages(m => [...m, ...r.data.messages]);
+        lastTsRef.current = r.data.messages[r.data.messages.length - 1].createdAt;
+      }
+    } catch {}
+  };
+
+  useEffect(() => { fetchInitial(); }, []);
+  useEffect(() => {
+    const id = setInterval(poll, 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      const r = await api.post('/chat/messages', { text });
+      setMessages(m => [...m, r.data.message]);
+      lastTsRef.current = r.data.message.createdAt;
+      setInput('');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to send');
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div className="chat-shell">
+      <div className="chat-header">
+        <h3 style={{ margin: 0 }}><MessageCircle size={16} /> Group Chat</h3>
+        <p className="small muted" style={{ margin: 0 }}>Everyone can see this. Teacher reads everything.</p>
+      </div>
+      <div className="chat-body" ref={scrollRef}>
+        {messages.length === 0 && <p className="muted small">No messages yet. Be the first to say hi.</p>}
+        {messages.map(m => {
+          const mine = (role === 'teacher' && m.role === 'teacher') || (role !== 'teacher' && m.name === currentName);
+          return (
+            <div key={m._id} className={'chat-msg ' + (mine ? 'me' : 'them') + (m.role === 'teacher' ? ' teacher' : '')}>
+              <div className="chat-meta">
+                <strong>{m.name}</strong>
+                {m.role === 'teacher' && <span className="chat-tag">Teacher</span>}
+                {m.rollNumber && <span className="muted small"> · Roll {m.rollNumber}</span>}
+                <span className="muted small chat-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+              <div className="chat-text">{m.text}</div>
+            </div>
+          );
+        })}
+      </div>
+      {error && <div className="error-box small">{error}</div>}
+      <div className="chat-input-row">
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Type a message…"
+          maxLength={1000}
+        />
+        <button className="btn btn-primary" onClick={send} disabled={sending || !input.trim()}><Send size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+// ----- PARENT MESSAGES (teacher inbox, request #12) -----
+function ParentMessagesInbox({ onUpdate }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/parent-messages');
+      setMessages(r.data.messages);
+      if (onUpdate) onUpdate(r.data.unread || 0);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const markRead = async (id) => {
+    await api.post('/parent-messages/' + id + '/read');
+    load();
+  };
+
+  if (loading) return <p className="muted">Loading…</p>;
+  if (messages.length === 0) return <div className="empty"><Inbox size={48} color="#999" /><h3>No messages yet</h3><p className="muted">Parents will send messages here.</p></div>;
+
+  return (
+    <div className="list">
+      {messages.map(m => (
+        <div key={m._id} className={'msg-row' + (m.read ? '' : ' unread')}>
+          <div style={{ flex: 1 }}>
+            <strong>{m.studentName}'s parent</strong>
+            <span className="muted small"> · {new Date(m.createdAt).toLocaleString()}</span>
+            <p style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{m.text}</p>
+          </div>
+          {!m.read && <button className="btn btn-outline btn-mini" onClick={() => markRead(m._id)}>Mark read</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ----- PARENT: SEND MESSAGE TO TEACHER -----
+function ParentMessageCompose() {
+  const [history, setHistory] = useState([]);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    try {
+      const r = await api.get('/parent-messages');
+      setHistory(r.data.messages || []);
+    } catch (err) { setError(err.response?.data?.error || 'Could not load'); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const send = async () => {
+    const t = text.trim();
+    if (!t || sending) return;
+    setSending(true); setError('');
+    try {
+      await api.post('/parent-messages', { text: t });
+      setText('');
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not send');
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div>
+      <h3><MessageSquare size={16} /> Message the Teacher</h3>
+      <p className="small muted">Your message goes directly to the teacher. They'll see it on their dashboard.</p>
+      <textarea
+        rows={4}
+        value={text}
+        onChange={e => setText(e.target.value.slice(0, 2000))}
+        placeholder="What would you like to tell the teacher?"
+      />
+      {error && <div className="error-box small">{error}</div>}
+      <button className="btn btn-primary" onClick={send} disabled={!text.trim() || sending}>
+        <Send size={14} /> {sending ? 'Sending…' : 'Send'}
+      </button>
+      <hr />
+      <h3>Your sent messages</h3>
+      {history.length === 0 ? <p className="muted small">You haven't sent any messages yet.</p> : (
+        <div className="list">
+          {history.map(m => (
+            <div key={m._id} className="msg-row">
+              <div style={{ flex: 1 }}>
+                <span className="muted small">{new Date(m.createdAt).toLocaleString()}</span>
+                <p style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{m.text}</p>
+              </div>
+              {m.read ? <span className="badge green small"><CheckCircle size={12} /> Read</span> : <span className="badge small">Unread</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----- COMPLAINTS INBOX (teacher, request #16) -----
+function ComplaintsInbox({ onUpdate }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/complaints');
+      setItems(r.data.complaints);
+      if (onUpdate) onUpdate(r.data.unread || 0);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const markRead = async (id) => {
+    await api.post('/complaints/' + id + '/read');
+    load();
+  };
+
+  if (loading) return <p className="muted">Loading…</p>;
+  if (items.length === 0) return <div className="empty"><AlertCircle size={48} color="#999" /><h3>No complaints</h3><p className="muted">Students can send private complaints here.</p></div>;
+
+  return (
+    <div className="list">
+      {items.map(c => (
+        <div key={c._id} className={'msg-row complaint-row' + (c.read ? '' : ' unread')}>
+          <div style={{ flex: 1 }}>
+            <strong>{c.studentName}</strong> <span className="muted small">(Roll {c.rollNumber}) · {new Date(c.createdAt).toLocaleString()}</span>
+            <p style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>{c.text}</p>
+          </div>
+          {!c.read && <button className="btn btn-outline btn-mini" onClick={() => markRead(c._id)}>Mark read</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ----- STUDENT: SEND COMPLAINT -----
+function ComplaintCompose() {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState('');
+
+  const send = async () => {
+    const t = text.trim();
+    if (!t || sending) return;
+    setSending(true); setError('');
+    try {
+      await api.post('/complaints', { text: t });
+      setText('');
+      setSent(true);
+      setTimeout(() => setSent(false), 4000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not send');
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div>
+      <h3><AlertCircle size={16} /> Talk to the Teacher (private)</h3>
+      <p className="small muted">This is private — only the teacher sees what you write here. If anyone is bullying you or something feels wrong, write it down. We'll help.</p>
+      <textarea
+        rows={5}
+        value={text}
+        onChange={e => setText(e.target.value.slice(0, 5000))}
+        placeholder="Tell the teacher what's going on…"
+      />
+      {error && <div className="error-box small">{error}</div>}
+      {sent && <div className="success-box small" style={{ padding: 10 }}><CheckCircle size={16} /> Sent to the teacher.</div>}
+      <button className="btn btn-primary" onClick={send} disabled={!text.trim() || sending}>
+        <Send size={14} /> {sending ? 'Sending…' : 'Send privately to teacher'}
+      </button>
+    </div>
+  );
+}
+
+// ============================
+// STUDENT CHAT DASHBOARD (request #14, #16)
+// ============================
+function StudentChatDashboard({ student, info, onSignOut }) {
+  const [tab, setTab] = useState('chat');
+
+  return (
+    <div className="page dashboard">
+      <header className="dash-header">
+        <div className="logo">
+          <GraduationCap size={24} />
+          <div>
+            <h1>{info.classroomName || 'Coaching Center'}</h1>
+            <p className="muted small">Signed in as {student?.name} (Roll #{student?.rollNumber})</p>
+          </div>
+        </div>
+        <button className="btn btn-outline" onClick={onSignOut}><LogOut size={14} /> Sign out</button>
+      </header>
+
+      <nav className="dash-nav">
+        <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}><MessageCircle size={14} /> Chat</button>
+        <button className={tab === 'complaint' ? 'active' : ''} onClick={() => setTab('complaint')}><AlertCircle size={14} /> Tell Teacher</button>
+        <button className={tab === 'ai' ? 'active' : ''} onClick={() => setTab('ai')}><Sparkles size={14} /> AI Help</button>
+      </nav>
+
+      <main className="dash-main">
+        {tab === 'chat' && <GroupChat role="student" currentName={student?.name} />}
+        {tab === 'complaint' && <ComplaintCompose />}
+        {tab === 'ai' && (
+          <div className="container-narrow">
+            <h3><Sparkles size={16} /> AI Help</h3>
+            <p className="small muted">Ask anything. The assistant knows about your attendance, fees, and class — but not about other students.</p>
+            <AIAssistantInline />
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// Inline (full-page) variant of the AI assistant
+function AIAssistantInline() {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, busy]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || busy) return;
+    const newMsgs = [...messages, { role: 'user', content: text }];
+    setMessages(newMsgs);
+    setInput('');
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api.post('/ai/chat', { messages: newMsgs });
+      setMessages([...newMsgs, { role: 'assistant', content: r.data.reply }]);
+    } catch (err) {
+      setError(err.response?.data?.error || 'AI request failed');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="ai-inline">
+      <div className="ai-body" ref={scrollRef} style={{ minHeight: 320, maxHeight: 480 }}>
+        {messages.length === 0 && <p className="muted small">Hi! I can help with attendance info, fees, schedule, or general questions.</p>}
+        {messages.map((m, i) => (
+          <div key={i} className={'ai-bubble ' + (m.role === 'user' ? 'me' : 'bot')}>{m.content}</div>
+        ))}
+        {busy && <div className="ai-bubble bot ai-typing">…</div>}
+      </div>
+      {error && <div className="error-box small">{error}</div>}
+      <div className="ai-input-row">
+        <textarea
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Type your question…"
+          rows={1}
+        />
+        <button className="btn btn-primary" onClick={send} disabled={busy || !input.trim()}><Send size={14} /></button>
       </div>
     </div>
   );

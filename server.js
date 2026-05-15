@@ -90,23 +90,46 @@ const ConfigSchema = new mongoose.Schema({
 
 const StudentSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  rollNumber: String,
+  rollNumber: { type: String, index: true },
   phone: String,
-  parentName: String,
+  parentName: String,    // father / primary guardian
+  motherName: String,    // mother / second guardian
   parentPhone: String,
   aadhar: String,
   birthday: String,
-  photo: String, // base64 data URL (small, capped at ~200KB by frontend)
-  subjects: { type: [String], default: [] }, // subject names; just for organization, no fee impact
-  className: { type: String, default: '' },   // name of the class (just a label now)
-  monthlyFee: { type: Number, default: 0 },   // fee set manually per student by teacher
-  batchId: { type: String, default: '' },     // _id of a Config.batches entry, or '' for none
-  parentCode: { type: String, index: true },  // unique code for parent login (no other password needed)
+  photo: String, // base64 data URL
+  subjects: { type: [String], default: [] },
+  className: { type: String, default: '' },
+  monthlyFee: { type: Number, default: 0 },
+  feeDueDay: { type: Number, default: 5 },    // day of month when fee is due (1-28)
+  batchId: { type: String, default: '' },
+  parentCode: { type: String, index: true },
+  bio: { type: String, default: '' },         // student's own bio (visible on profile)
+  instagram: { type: String, default: '' },   // optional Instagram URL/handle
   notes: String,
   joinDate: { type: Date, default: Date.now },
-  enrollmentDate: { type: String, default: () => istDateISO() }, // YYYY-MM-DD, used for fees
+  enrollmentDate: { type: String, default: () => istDateISO() },
   registeredVia: { type: String, enum: ['teacher', 'self'], default: 'teacher' },
-  pendingApproval: { type: Boolean, default: false }, // self-registered students wait for teacher approval
+  pendingApproval: { type: Boolean, default: false },
+});
+
+// Fee payments tracker (one record per student per month)
+const FeePaymentSchema = new mongoose.Schema({
+  studentId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+  month: { type: String, required: true }, // YYYY-MM
+  paidOn: { type: Date, default: Date.now },
+  amount: Number,
+  note: String,
+});
+FeePaymentSchema.index({ studentId: 1, month: 1 }, { unique: true });
+
+// Exam / Test announcements (sent to selected students)
+const ExamSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: String,
+  examDate: String, // YYYY-MM-DD
+  studentIds: [{ type: mongoose.Schema.Types.ObjectId }], // empty = all students
+  createdAt: { type: Date, default: Date.now },
 });
 
 const AttendanceSchema = new mongoose.Schema({
@@ -129,13 +152,18 @@ const AnnouncementSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-// v4: parent → teacher inbox
+// v4: parent → teacher inbox (now two-way chat)
 const ParentMessageSchema = new mongoose.Schema({
   studentId: { type: mongoose.Schema.Types.ObjectId, required: true },
   studentName: String,
   text: { type: String, required: true },
+  from: { type: String, enum: ['parent', 'teacher'], default: 'parent' },
   createdAt: { type: Date, default: Date.now },
   read: { type: Boolean, default: false },
+  deletedBy: {
+    teacher: { type: Boolean, default: false },
+    parent: { type: Boolean, default: false },
+  },
 });
 
 // v4: student → teacher complaint (private)
@@ -166,31 +194,37 @@ const Announcement = mongoose.model('Announcement', AnnouncementSchema);
 const ParentMessage = mongoose.model('ParentMessage', ParentMessageSchema);
 const Complaint = mongoose.model('Complaint', ComplaintSchema);
 const ChatMessage = mongoose.model('ChatMessage', ChatMessageSchema);
+const FeePayment = mongoose.model('FeePayment', FeePaymentSchema);
+const Exam = mongoose.model('Exam', ExamSchema);
 
 // ===========================
 // ID + CODE HELPERS
 // ===========================
-// Friendlier code: letter + last4 of parent phone + letter, e.g. K7842M.
-// Falls back to random digits when no parent phone is available.
-const FRIENDLY_CONSONANTS = 'BCDFGHJKLMNPQRSTVWXYZ'.split(''); // no vowels, no I/O ambiguity
-const generateParentCode = (parentPhone) => {
-  const last4 = (parentPhone || '').replace(/\D/g, '').slice(-4);
-  const digits = last4.length === 4
-    ? last4
-    : Array.from({ length: 4 }, () => crypto.randomInt(0, 10)).join('');
-  const c1 = FRIENDLY_CONSONANTS[crypto.randomInt(0, FRIENDLY_CONSONANTS.length)];
-  const c2 = FRIENDLY_CONSONANTS[crypto.randomInt(0, FRIENDLY_CONSONANTS.length)];
-  return c1 + digits + c2;
+// Friendlier code: 3 letters from student name + 3 digits from parent phone
+// e.g. "Ankit" + "9876543210" => "ANK210"
+// Falls back gracefully when name is too short or phone is missing.
+const generateParentCode = (studentName, parentPhone) => {
+  const lettersRaw = (studentName || '').replace(/[^A-Za-z]/g, '').toUpperCase();
+  let letters = lettersRaw.slice(0, 3);
+  while (letters.length < 3) {
+    letters += String.fromCharCode(65 + crypto.randomInt(0, 26));
+  }
+  const digitsRaw = (parentPhone || '').replace(/\D/g, '');
+  let digits = digitsRaw.slice(-3);
+  while (digits.length < 3) {
+    digits += String(crypto.randomInt(0, 10));
+  }
+  return letters + digits;
 };
 
-const ensureUniqueParentCode = async (parentPhone) => {
-  for (let i = 0; i < 20; i++) {
-    const code = generateParentCode(parentPhone);
+const ensureUniqueParentCode = async (studentName, parentPhone) => {
+  for (let i = 0; i < 30; i++) {
+    const code = generateParentCode(studentName, parentPhone);
     const exists = await Student.findOne({ parentCode: code });
     if (!exists) return code;
   }
   // very unlikely fallback
-  return generateParentCode() + Date.now().toString(36).slice(-2).toUpperCase();
+  return generateParentCode(studentName, parentPhone) + crypto.randomInt(10, 99);
 };
 
 // Verhoeff checksum (UIDAI's algorithm) — catches typos and fake Aadhar numbers.
@@ -409,9 +443,19 @@ app.post('/api/public/register', async (req, res) => {
       return res.status(400).json({ error: 'Aadhar number is invalid. Please check the 12 digits.' });
     }
 
-    const count = await Student.countDocuments();
-    const rollNumber = String(count + 1).padStart(3, '0');
-    const parentCode = await ensureUniqueParentCode(parentPhone);
+    // Generate a unique roll number
+    let rollNumber = '';
+    {
+      const count = await Student.countDocuments();
+      let n = count + 1;
+      while (true) {
+        const candidate = String(n).padStart(3, '0');
+        const exists = await Student.findOne({ rollNumber: candidate });
+        if (!exists) { rollNumber = candidate; break; }
+        n++;
+      }
+    }
+    const parentCode = await ensureUniqueParentCode(name, parentPhone);
     const student = new Student({
       name, phone, parentName, parentPhone, aadhar, birthday, photo,
       subjects: subjects || [],
@@ -481,9 +525,22 @@ app.post('/api/students', authenticate, teacherOnly, async (req, res) => {
     if (req.body.aadhar && !isValidAadhar(req.body.aadhar)) {
       return res.status(400).json({ error: 'Aadhar number is invalid (failed checksum).' });
     }
-    const count = await Student.countDocuments();
-    const rollNumber = req.body.rollNumber || String(count + 1).padStart(3, '0');
-    const parentCode = req.body.parentCode || await ensureUniqueParentCode(req.body.parentPhone);
+    // Generate a unique roll number (or use the one provided if free)
+    let rollNumber = (req.body.rollNumber || '').trim();
+    if (rollNumber) {
+      const exists = await Student.findOne({ rollNumber });
+      if (exists) return res.status(409).json({ error: 'Roll number already in use by another student.' });
+    } else {
+      const count = await Student.countDocuments();
+      let n = count + 1;
+      while (true) {
+        const candidate = String(n).padStart(3, '0');
+        const exists = await Student.findOne({ rollNumber: candidate });
+        if (!exists) { rollNumber = candidate; break; }
+        n++;
+      }
+    }
+    const parentCode = req.body.parentCode || await ensureUniqueParentCode(req.body.name, req.body.parentPhone);
     const student = new Student({
       ...req.body,
       rollNumber,
@@ -541,7 +598,9 @@ app.post('/api/students/:id/approve', authenticate, teacherOnly, async (req, res
 // Regenerate a student's parent code
 app.post('/api/students/:id/regenerate-code', authenticate, teacherOnly, async (req, res) => {
   try {
-    const code = await ensureUniqueParentCode();
+    const s = await Student.findById(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    const code = await ensureUniqueParentCode(s.name, s.parentPhone);
     const student = await Student.findByIdAndUpdate(req.params.id, { parentCode: code }, { new: true });
     res.json(student);
   } catch (err) {
@@ -1183,6 +1242,285 @@ app.post('/api/chat/messages', authenticate, async (req, res) => {
 });
 
 // ===========================
+// STUDENT SELF-EDIT (bio, instagram)
+// ===========================
+app.put('/api/students/me', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'student') return res.status(403).json({ error: 'Student only' });
+    const allowed = {};
+    if (typeof req.body.bio === 'string') allowed.bio = req.body.bio.slice(0, 500);
+    if (typeof req.body.instagram === 'string') allowed.instagram = req.body.instagram.slice(0, 200);
+    if (typeof req.body.photo === 'string') {
+      if (req.body.photo.length > 600000) return res.status(413).json({ error: 'Photo too large' });
+      allowed.photo = req.body.photo;
+    }
+    await Student.findByIdAndUpdate(req.user.studentId, allowed);
+    const s = await Student.findById(req.user.studentId);
+    res.json({ ok: true, student: s });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get a single student's public profile (for chat profile modal)
+// Returns ONLY fields that are safe to expose to other students
+app.get('/api/students/:id/profile', authenticate, async (req, res) => {
+  try {
+    const s = await Student.findById(req.params.id).select('name rollNumber photo bio instagram className batchId subjects birthday');
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    const cfg = await Config.findOne().select('batches');
+    const batch = cfg?.batches?.find(b => String(b._id) === String(s.batchId));
+    res.json({
+      _id: s._id,
+      name: s.name,
+      rollNumber: s.rollNumber,
+      photo: s.photo,
+      bio: s.bio,
+      instagram: s.instagram,
+      className: s.className,
+      subjects: s.subjects,
+      batch: batch ? { name: batch.name, startTime: batch.startTime, endTime: batch.endTime } : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// FEES — MARK PAID / PENDING LIST
+// ===========================
+app.get('/api/fees/pending', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const yyyymm = req.query.month || istDateISO().substring(0, 7);
+    const students = await Student.find({ pendingApproval: { $ne: true }, monthlyFee: { $gt: 0 } }).select('name rollNumber monthlyFee feeDueDay parentPhone parentName photo className');
+    const paid = await FeePayment.find({ month: yyyymm });
+    const paidIds = new Set(paid.map(p => String(p.studentId)));
+    const today = new Date();
+    const todayDay = today.getDate();
+    const pending = students
+      .filter(s => !paidIds.has(String(s._id)))
+      .map(s => ({
+        ...s.toObject(),
+        overdue: todayDay > (s.feeDueDay || 5),
+        dueDay: s.feeDueDay || 5,
+      }));
+    res.json({ month: yyyymm, pending, totalPaid: paid.length, totalPending: pending.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fees/mark-paid', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const { studentId, month, amount, note } = req.body;
+    if (!studentId || !month) return res.status(400).json({ error: 'studentId and month required' });
+    const existing = await FeePayment.findOne({ studentId, month });
+    if (existing) {
+      existing.paidOn = new Date();
+      existing.amount = amount;
+      existing.note = note;
+      await existing.save();
+      return res.json({ ok: true, payment: existing });
+    }
+    const payment = new FeePayment({ studentId, month, amount, note });
+    await payment.save();
+    res.json({ ok: true, payment });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// For parent: see if their child has fees pending and how many days till due
+app.get('/api/fees/my-status', authenticate, async (req, res) => {
+  try {
+    if (!['parent', 'student'].includes(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
+    const s = await Student.findById(req.user.studentId);
+    if (!s || !s.monthlyFee || s.monthlyFee <= 0) return res.json({ hasFee: false });
+    const yyyymm = istDateISO().substring(0, 7);
+    const paid = await FeePayment.findOne({ studentId: s._id, month: yyyymm });
+    const today = new Date();
+    const todayDay = today.getDate();
+    const dueDay = s.feeDueDay || 5;
+    const daysUntilDue = dueDay - todayDay; // negative if overdue
+    res.json({
+      hasFee: true,
+      paid: !!paid,
+      paidOn: paid?.paidOn,
+      amount: s.monthlyFee,
+      dueDay,
+      daysUntilDue,
+      overdue: !paid && todayDay > dueDay,
+      showReminder: !paid && daysUntilDue <= 5,
+      month: yyyymm,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// EXAMS / TESTS (teacher creates, sends to selected students)
+// ===========================
+app.post('/api/exams', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const { title, description, examDate, studentIds } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title required' });
+    const exam = new Exam({
+      title, description, examDate,
+      studentIds: Array.isArray(studentIds) ? studentIds : [],
+    });
+    await exam.save();
+    res.json({ ok: true, exam });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/exams', authenticate, async (req, res) => {
+  try {
+    if (req.user.role === 'teacher') {
+      const exams = await Exam.find().sort({ createdAt: -1 }).limit(50);
+      return res.json({ exams });
+    }
+    // parent/student see only exams targeted at them (or to everyone, i.e. empty studentIds)
+    const myId = req.user.studentId;
+    const exams = await Exam.find({
+      $or: [{ studentIds: { $size: 0 } }, { studentIds: myId }]
+    }).sort({ createdAt: -1 }).limit(30);
+    res.json({ exams });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/exams/:id', authenticate, teacherOnly, async (req, res) => {
+  try {
+    await Exam.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// PARENT ↔ TEACHER CHAT (WhatsApp-style two-way)
+// Reuses ParentMessage schema with from/deletedBy fields added.
+// ===========================
+// Send a message — both teacher and parent can use this
+app.post('/api/parent-chat/send', authenticate, async (req, res) => {
+  try {
+    const text = (req.body.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Message required' });
+    if (text.length > 2000) return res.status(400).json({ error: 'Message too long' });
+
+    let studentId, studentName, from;
+    if (req.user.role === 'parent') {
+      studentId = req.user.studentId;
+      from = 'parent';
+      const s = await Student.findById(studentId).select('name');
+      studentName = s?.name || 'Parent';
+    } else if (req.user.role === 'teacher') {
+      studentId = req.body.studentId;
+      if (!studentId) return res.status(400).json({ error: 'studentId required for teacher messages' });
+      from = 'teacher';
+      const s = await Student.findById(studentId).select('name');
+      studentName = s?.name || '';
+    } else {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const msg = new ParentMessage({
+      studentId,
+      studentName,
+      text,
+      from, // 'parent' or 'teacher'
+    });
+    await msg.save();
+    res.json({ ok: true, message: msg });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get conversation for a specific parent (teacher passes studentId; parent uses their own)
+app.get('/api/parent-chat/:studentId', authenticate, async (req, res) => {
+  try {
+    if (!parentScopeCheck(req, req.params.studentId)) {
+      if (req.user.role !== 'teacher') return res.status(403).json({ error: 'Forbidden' });
+    }
+    const userId = req.user.role === 'teacher' ? 'teacher' : 'parent';
+    const messages = await ParentMessage.find({
+      studentId: req.params.studentId,
+      // hide messages the current user has deleted
+      [`deletedBy.${userId}`]: { $ne: true }
+    }).sort({ createdAt: 1 }).limit(500);
+    res.json({ messages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a message for current user only (other side still sees it)
+app.post('/api/parent-chat/:id/delete', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.role === 'teacher' ? 'teacher' : 'parent';
+    const msg = await ParentMessage.findById(req.params.id);
+    if (!msg) return res.status(404).json({ error: 'Not found' });
+    // parent can only delete from their own conversation
+    if (req.user.role === 'parent' && String(msg.studentId) !== String(req.user.studentId)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const path = `deletedBy.${userId}`;
+    await ParentMessage.updateOne({ _id: req.params.id }, { $set: { [path]: true } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List of parent conversations for teacher (one per student who has chatted)
+app.get('/api/parent-chat-list', authenticate, teacherOnly, async (req, res) => {
+  try {
+    const msgs = await ParentMessage.aggregate([
+      { $match: { 'deletedBy.teacher': { $ne: true } } },
+      { $sort: { createdAt: -1 } },
+      { $group: {
+        _id: '$studentId',
+        lastMessage: { $first: '$text' },
+        lastFrom: { $first: '$from' },
+        lastAt: { $first: '$createdAt' },
+        unread: { $sum: { $cond: [{ $and: [{ $eq: ['$from', 'parent'] }, { $ne: ['$read', true] }] }, 1, 0] } },
+      }},
+      { $sort: { lastAt: -1 } },
+    ]);
+    // attach student info
+    const ids = msgs.map(m => m._id);
+    const students = await Student.find({ _id: { $in: ids } }).select('name photo rollNumber').lean();
+    const map = Object.fromEntries(students.map(s => [String(s._id), s]));
+    const result = msgs.map(m => ({
+      ...m,
+      student: map[String(m._id)] || { name: 'Unknown', _id: m._id }
+    }));
+    res.json({ conversations: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Mark conversation as read (teacher only)
+app.post('/api/parent-chat/:studentId/mark-read', authenticate, teacherOnly, async (req, res) => {
+  try {
+    await ParentMessage.updateMany(
+      { studentId: req.params.studentId, from: 'parent', read: { $ne: true } },
+      { $set: { read: true } }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
 // AI ASSISTANT — Google Gemini (free, no SDK needed)
 // ===========================
 
@@ -1357,11 +1695,32 @@ mongoose.connection.once('open', async () => {
     // Backfill parentCode for existing students.
     const missing = await Student.find({ $or: [{ parentCode: { $exists: false } }, { parentCode: '' }, { parentCode: null }] });
     for (const s of missing) {
-      s.parentCode = await ensureUniqueParentCode();
+      s.parentCode = await ensureUniqueParentCode(s.name, s.parentPhone);
       if (!s.enrollmentDate) s.enrollmentDate = istDateISO();
       await s.save();
     }
     if (missing.length) console.log(`✓ Backfilled parentCode for ${missing.length} student(s)`);
+
+    // Fix duplicate roll numbers
+    const allStudents = await Student.find().sort({ joinDate: 1 });
+    const seenRolls = new Set();
+    let fixedRolls = 0;
+    for (const s of allStudents) {
+      const current = (s.rollNumber || '').trim();
+      if (current && !seenRolls.has(current)) {
+        seenRolls.add(current);
+        continue;
+      }
+      // Need a new unique roll
+      let n = allStudents.length + 1;
+      while (seenRolls.has(String(n).padStart(3, '0'))) n++;
+      const newRoll = String(n).padStart(3, '0');
+      seenRolls.add(newRoll);
+      s.rollNumber = newRoll;
+      await s.save();
+      fixedRolls++;
+    }
+    if (fixedRolls) console.log(`✓ Fixed ${fixedRolls} duplicate roll number(s)`);
   } catch (err) {
     console.error('Migration warning:', err.message);
   }

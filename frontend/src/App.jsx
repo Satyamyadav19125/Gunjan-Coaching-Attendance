@@ -692,16 +692,10 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
         <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}><Calendar size={16} /> Today</button>
         <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}><Users size={16} /> Students</button>
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
-        <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
-        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Announcements</button>
         <button className={tab === 'chat' ? 'tab active' : 'tab'} onClick={() => setTab('chat')}><MessageCircle size={16} /> Chat</button>
         <button className={tab === 'messages' ? 'tab active' : 'tab'} onClick={() => setTab('messages')}>
-          <Inbox size={16} /> Parents
+          <Inbox size={16} /> Parent Msgs
           {unreadMsgs > 0 && <span className="tab-badge">{unreadMsgs}</span>}
-        </button>
-        <button className={tab === 'complaints' ? 'tab active' : 'tab'} onClick={() => setTab('complaints')}>
-          <AlertCircle size={16} /> Complaints
-          {unreadComplaints > 0 && <span className="tab-badge red">{unreadComplaints}</span>}
         </button>
         <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}><Settings size={16} /> Settings</button>
       </nav>
@@ -710,11 +704,8 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
         {tab === 'today' && <TodayTab info={info} announcements={announcements} />}
         {tab === 'students' && <StudentsTab info={info} refreshInfo={refreshInfo} />}
         {tab === 'summary' && <SummaryTab info={info} />}
-        {tab === 'fees' && <FeesTab info={info} />}
-        {tab === 'announcements' && <AnnouncementsTab info={info} />}
         {tab === 'chat' && <GroupChat role="teacher" currentName={info.teacherName || 'Teacher'} />}
         {tab === 'messages' && <ParentMessagesInbox onUpdate={setUnreadMsgs} />}
-        {tab === 'complaints' && <ComplaintsInbox onUpdate={setUnreadComplaints} />}
         {tab === 'settings' && <SettingsTab info={info} refreshInfo={refreshInfo} />}
       </main>
 
@@ -1050,6 +1041,7 @@ function StudentsTab({ info, refreshInfo }) {
   const [pending, setPending] = useState([]);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('name');
@@ -1161,7 +1153,7 @@ function StudentsTab({ info, refreshInfo }) {
           const age = ageFromDOB(s.birthday);
           return (
             <div key={s._id} className="student-card">
-              <div className="row" style={{ gap: 12, alignItems: 'flex-start', flex: 1 }}>
+              <div className="row" style={{ gap: 12, alignItems: 'flex-start', flex: 1, cursor: 'pointer' }} onClick={() => setViewing(s)}>
                 {s.photo ? <img src={s.photo} alt={s.name} className="student-avatar" /> : <div className="student-avatar placeholder"><User size={20} /></div>}
                 <div style={{ flex: 1 }}>
                   <strong>{s.name}</strong>
@@ -1169,23 +1161,26 @@ function StudentsTab({ info, refreshInfo }) {
                   {age != null && <span className="age-tag">Age {age}</span>}
                   <p className="muted small">Roll #{s.rollNumber} · {s.phone || 'No phone'}</p>
                   {s.className && <p className="small">Class: <strong>{s.className}</strong></p>}
+                  {s.monthlyFee > 0 && <p className="small">Fee: <strong>₹{Number(s.monthlyFee).toLocaleString('en-IN')}/month</strong></p>}
                   {batch && <p className="small"><Layers size={12} /> Batch: <strong>{batch.name}</strong> ({batch.startTime}-{batch.endTime})</p>}
                   {s.subjects?.length > 0 && <p className="small">Subjects: {s.subjects.join(', ')}</p>}
+                  {Number(s.monthlyFee) > 0 && <p className="small"><IndianRupee size={12} /> Fee: <strong>{formatRupee(s.monthlyFee)}</strong>/month</p>}
                   {s.parentCode && (
                     <p className="small">
                       Parent code: <code className="inline-code">{s.parentCode}</code>{' '}
-                      <button className="btn-link" onClick={() => setShowCodeFor(s)}>Show / share</button>
+                      <button className="btn-link" onClick={(e) => { e.stopPropagation(); setShowCodeFor(s); }}>Show / share</button>
                     </p>
                   )}
                   {s.parentPhone && (
                     <p className="small">
                       Parent: {s.parentName || ''} ·{' '}
-                      <a href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
+                      <a onClick={(e) => e.stopPropagation()} href={whatsappLink(s.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} from ${info.classroomName || 'coaching center'} about ${s.name}.`)} target="_blank" rel="noreferrer" className="wa-link">
                         <MessageCircle size={12} /> WhatsApp
                       </a>
                     </p>
                   )}
                   {s.registeredVia === 'self' && <span className="badge blue small">Self-registered</span>}
+                  <p className="small muted" style={{ marginTop: 6 }}><Eye size={12} /> Tap for full details &amp; attendance graph</p>
                 </div>
               </div>
               <div className="row-buttons">
@@ -1205,6 +1200,10 @@ function StudentsTab({ info, refreshInfo }) {
           onClose={() => { setAdding(false); setEditing(null); }}
           onSaved={() => { setAdding(false); setEditing(null); load(); }}
         />
+      )}
+
+      {viewing && (
+        <StudentDetailModal student={viewing} info={info} onClose={() => setViewing(null)} onEdit={() => { setEditing(viewing); setViewing(null); }} />
       )}
 
       {showCodeFor && (
@@ -1242,7 +1241,7 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
 
   const [form, setForm] = useState(student || {
     name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: '', photo: ''
+    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: '', photo: '', monthlyFee: 0
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1295,18 +1294,19 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
       </label>
       <input value={form.aadhar || ''} onChange={e => setForm({...form, aadhar: e.target.value.replace(/\D/g, '').slice(0, 12)})} maxLength={12} inputMode="numeric" />
 
-      {/* Class (request #9) - determines monthly fee */}
-      <label>Class</label>
-      {(info.classes?.length || 0) === 0 ? (
-        <p className="small muted">No classes yet — add some in Settings → Classes.</p>
-      ) : (
-        <select value={form.className || ''} onChange={e => setForm({ ...form, className: e.target.value })}>
-          <option value="">— No class —</option>
-          {info.classes.map(c => (
-            <option key={c.name} value={c.name}>{c.name} (₹{(c.monthlyFee || 0).toLocaleString('en-IN')}/month)</option>
-          ))}
-        </select>
-      )}
+      {/* Class (just a label - e.g. "8th Standard", no fee logic) */}
+      <label>Class / Standard</label>
+      <input value={form.className || ''} onChange={e => setForm({ ...form, className: e.target.value })} placeholder="e.g. 8th Standard, Class 10, etc." />
+
+      {/* Monthly Fee (manual per student) */}
+      <label>Monthly Fee (₹) <span className="small muted">— set whatever amount you want for this student</span></label>
+      <input
+        type="number"
+        min="0"
+        value={form.monthlyFee || 0}
+        onChange={e => setForm({ ...form, monthlyFee: Number(e.target.value) || 0 })}
+        placeholder="e.g. 5000"
+      />
 
       <label>Batch</label>
       {(info.batches?.length || 0) === 0 ? (
@@ -1505,6 +1505,7 @@ function SummaryTab({ info }) {
                   {selected.parentPhone && <><dt>Parent phone</dt><dd>{selected.parentPhone}</dd></>}
                   {selected.parentCode && <><dt>Parent code</dt><dd><code className="inline-code">{selected.parentCode}</code></dd></>}
                   {selected.className && <><dt>Class</dt><dd>{selected.className}</dd></>}
+                  {Number(selected.monthlyFee) > 0 && <><dt>Monthly Fee</dt><dd>{formatRupee(selected.monthlyFee)}</dd></>}
                   {selected.batchId && findBatch(info, selected.batchId) && <><dt>Batch</dt><dd>{findBatch(info, selected.batchId).name} ({findBatch(info, selected.batchId).startTime}-{findBatch(info, selected.batchId).endTime})</dd></>}
                   {selected.subjects?.length > 0 && <><dt>Subjects</dt><dd>{selected.subjects.join(', ')}</dd></>}
                   {selected.enrollmentDate && <><dt>Enrolled</dt><dd>{selected.enrollmentDate}</dd></>}
@@ -1533,14 +1534,17 @@ function SummaryTab({ info }) {
               )}
 
               <div className="row" style={{justifyContent: 'space-between'}}>
-                <h3>Attendance History</h3>
+                <h3><BarChart3 size={16} /> Attendance — {monthFilter || new Date().toISOString().substring(0, 7)}</h3>
                 {monthOptions.length > 0 && (
                   <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className="sort-select">
-                    <option value="">All months</option>
+                    <option value="">Current month</option>
                     {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 )}
               </div>
+              <AttendanceGraph history={history} month={monthFilter || new Date().toISOString().substring(0, 7)} />
+
+              <h3 style={{ marginTop: 20 }}>Attendance History</h3>
               <div className="list">
                 {filteredHistory.length === 0 && <p className="muted">No records for this period.</p>}
                 {filteredHistory.map(h => (
@@ -1570,6 +1574,72 @@ function SummaryTab({ info }) {
 }
 
 // Simple SVG bar chart used by SummaryTab and FeesTab
+// Attendance graph — calendar-style view of one month showing present/absent/unmarked days
+function AttendanceGraph({ history, month }) {
+  // month is YYYY-MM string; default to current
+  const [yStr, mStr] = (month || new Date().toISOString().substring(0, 7)).split('-');
+  const year = Number(yStr);
+  const m = Number(mStr); // 1..12
+  const daysInMonth = new Date(year, m, 0).getDate();
+  const firstWeekday = new Date(year, m - 1, 1).getDay(); // 0=Sun
+  const todayISO = new Date().toISOString().substring(0, 10);
+
+  // Build lookup of date -> status
+  const byDate = {};
+  (history || []).forEach(h => { byDate[h.date] = h; });
+
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  let present = 0, absent = 0, unmarked = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const rec = byDate[iso];
+    if (iso <= todayISO) {
+      if (rec?.status === 'present') present++;
+      else if (rec?.status === 'absent') absent++;
+      else unmarked++;
+    }
+    cells.push({ day: d, iso, rec });
+  }
+  const total = present + absent;
+  const pct = total ? Math.round((present / total) * 100) : 0;
+
+  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+  return (
+    <div className="att-graph-card">
+      <div className="att-graph-summary">
+        <div className="att-stat green"><strong>{present}</strong><span>Present</span></div>
+        <div className="att-stat red"><strong>{absent}</strong><span>Absent</span></div>
+        <div className="att-stat blue"><strong>{pct}%</strong><span>Rate</span></div>
+      </div>
+      <div className="att-cal">
+        {dayLabels.map((d, i) => <div key={'dl' + i} className="att-cal-label">{d}</div>)}
+        {cells.map((c, i) => {
+          if (!c) return <div key={'e' + i} className="att-cal-cell empty" />;
+          const future = c.iso > todayISO;
+          let cls = 'att-cal-cell';
+          if (future) cls += ' future';
+          else if (c.rec?.status === 'present') cls += ' present';
+          else if (c.rec?.status === 'absent') cls += ' absent';
+          else cls += ' unmarked';
+          if (c.iso === todayISO) cls += ' today';
+          return (
+            <div key={c.iso} className={cls} title={`${c.iso}${c.rec ? ': ' + c.rec.status : ''}`}>
+              {c.day}
+            </div>
+          );
+        })}
+      </div>
+      <div className="att-cal-legend">
+        <span><span className="dot green" /> Present</span>
+        <span><span className="dot red" /> Absent</span>
+        <span><span className="dot gray" /> Not marked</span>
+      </div>
+    </div>
+  );
+}
+
 function BatchChart({ groups }) {
   if (!groups.length) return null;
   const maxV = Math.max(100, ...groups.map(g => g.value));
@@ -2006,36 +2076,6 @@ function SettingsTab({ info, refreshInfo }) {
       <input type="time" value={form.classEnd || ''} onChange={e => setForm({...form, classEnd: e.target.value})} />
 
       <hr />
-      <h3><GraduationCap size={16} /> Classes & Monthly Fees</h3>
-      <p className="small muted">A student's monthly fee comes from the class they belong to. Per-day fee is auto-calculated from working days.</p>
-      <table className="settings-table">
-        <thead>
-          <tr><th>Class</th><th>Monthly Fee (₹)</th><th></th></tr>
-        </thead>
-        <tbody>
-          {(form.classes || []).length === 0 && (
-            <tr><td colSpan={3} className="muted small">No classes yet. Add one below.</td></tr>
-          )}
-          {(form.classes || []).map(c => (
-            <tr key={c.name}>
-              <td>{c.name}</td>
-              <td>
-                <input type="number" min="0" value={c.monthlyFee} onChange={e => updateClassFee(c.name, e.target.value)} style={{ maxWidth: 140 }} />
-              </td>
-              <td className="text-right">
-                <button className="icon-btn icon-btn-danger" onClick={() => removeClass(c.name)}><Trash2 size={14} /></button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="row" style={{ marginTop: 8 }}>
-        <input value={className} onChange={e => setClassName(e.target.value)} placeholder="e.g. 8th Standard" />
-        <input type="number" min="0" value={classFee} onChange={e => setClassFee(e.target.value)} placeholder="Monthly fee (₹)" style={{ maxWidth: 180 }} />
-        <button className="btn btn-outline" onClick={addClass}><Plus size={14} /> Add class</button>
-      </div>
-
-      <hr />
       <h3><Layers size={16} /> Batches (each can have its own timing & off-days)</h3>
       <p className="small muted">Default off-day is Sunday only.</p>
       <div className="batch-list">
@@ -2410,7 +2450,6 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
         <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}><Calendar size={16} /> History</button>
         <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
-        <button className={tab === 'announcements' ? 'tab active' : 'tab'} onClick={() => setTab('announcements')}><Megaphone size={16} /> Updates</button>
         <button className={tab === 'message' ? 'tab active' : 'tab'} onClick={() => setTab('message')}><MessageSquare size={16} /> Message Teacher</button>
         <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}><Info size={16} /> Class Info</button>
       </nav>
@@ -3055,7 +3094,7 @@ function ComplaintCompose() {
 // STUDENT CHAT DASHBOARD (request #14, #16)
 // ============================
 function StudentChatDashboard({ student, info, onSignOut }) {
-  const [tab, setTab] = useState('chat');
+  const [tab, setTab] = useState('mark');
 
   return (
     <div className="page dashboard">
@@ -3071,14 +3110,15 @@ function StudentChatDashboard({ student, info, onSignOut }) {
       </header>
 
       <nav className="dash-nav">
-        <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}><MessageCircle size={14} /> Chat</button>
-        <button className={tab === 'complaint' ? 'active' : ''} onClick={() => setTab('complaint')}><AlertCircle size={14} /> Tell Teacher</button>
+        <button className={tab === 'mark' ? 'active' : ''} onClick={() => setTab('mark')}><CheckCircle size={14} /> Mark Present</button>
+        <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}><MessageCircle size={14} /> Group Chat</button>
         <button className={tab === 'ai' ? 'active' : ''} onClick={() => setTab('ai')}><Sparkles size={14} /> AI Help</button>
+        <button className={tab === 'profile' ? 'active' : ''} onClick={() => setTab('profile')}><User size={14} /> My Photo</button>
       </nav>
 
       <main className="dash-main">
+        {tab === 'mark' && <StudentMarkPresent student={student} />}
         {tab === 'chat' && <GroupChat role="student" currentName={student?.name} />}
-        {tab === 'complaint' && <ComplaintCompose />}
         {tab === 'ai' && (
           <div className="container-narrow">
             <h3><Sparkles size={16} /> AI Help</h3>
@@ -3086,7 +3126,122 @@ function StudentChatDashboard({ student, info, onSignOut }) {
             <AIAssistantInline />
           </div>
         )}
+        {tab === 'profile' && <StudentProfilePhoto student={student} />}
       </main>
+    </div>
+  );
+}
+
+// Student marks themselves present (after roll-number login on teacher's phone)
+function StudentMarkPresent({ student }) {
+  const [note, setNote] = useState('');
+  const [done, setDone] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [todayStatus, setTodayStatus] = useState(null); // {status, inTime}
+
+  const checkToday = async () => {
+    try {
+      const r = await api.get('/attendance/student/' + student._id);
+      const today = new Date().toISOString().substring(0, 10);
+      const todayRec = (r.data || []).find(a => a.date === today);
+      if (todayRec) setTodayStatus(todayRec);
+    } catch {}
+  };
+
+  useEffect(() => { checkToday(); }, []);
+
+  const mark = async () => {
+    setBusy(true); setError('');
+    try {
+      const r = await api.post('/attendance/self-mark', { note: note.trim() || undefined });
+      setDone({ attendance: r.data });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not mark present');
+    } finally { setBusy(false); }
+  };
+
+  if (done) {
+    return (
+      <div className="container-narrow text-center" style={{ padding: '40px 20px' }}>
+        <div className="big-check">✓</div>
+        <h2 className="display">Marked Present!</h2>
+        <p className="muted">
+          {student.name}, you're checked in at {done.attendance.inTime}.
+        </p>
+        <p className="small muted" style={{ marginTop: 16 }}>Please hand the phone back to your teacher.</p>
+      </div>
+    );
+  }
+
+  if (todayStatus && todayStatus.status === 'present') {
+    return (
+      <div className="container-narrow text-center" style={{ padding: '40px 20px' }}>
+        <div className="big-check" style={{ background: '#16a34a' }}>✓</div>
+        <h2 className="display">Already Marked Today</h2>
+        <p className="muted">You were checked in at {todayStatus.inTime}.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container-narrow">
+      <h3><CheckCircle size={18} color="#16a34a" /> Mark Yourself Present</h3>
+      <p className="muted small">Tap the button below to mark your attendance for today. This is for use on the teacher's phone when you arrive at class.</p>
+
+      {student.photo && (
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
+          <img src={student.photo} alt={student.name} style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '3px solid #0a84ff' }} />
+          <h3 style={{ marginTop: 8 }}>{student.name}</h3>
+          <p className="muted small">Roll #{student.rollNumber}</p>
+        </div>
+      )}
+
+      <label style={{ marginTop: 20 }}>Note (optional)</label>
+      <textarea
+        value={note}
+        onChange={e => setNote(e.target.value.slice(0, 300))}
+        rows={2}
+        placeholder="e.g. running late, came for makeup..."
+      />
+
+      {error && <div className="error-box">{error}</div>}
+
+      <button className="btn btn-primary btn-block btn-lg" onClick={mark} disabled={busy} style={{ marginTop: 16 }}>
+        {busy ? 'Marking...' : '✓ Mark Me Present'}
+      </button>
+    </div>
+  );
+}
+
+// Student manages their own profile photo
+function StudentProfilePhoto({ student }) {
+  const [photo, setPhoto] = useState(student.photo || '');
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      await api.post('/students/me/photo', { photo });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not save photo');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="container-narrow">
+      <h3><Camera size={18} /> My Photo</h3>
+      <p className="small muted">Add a photo so your friends can recognize you in group chat.</p>
+      <PhotoCapture value={photo} onChange={setPhoto} />
+      {error && <div className="error-box">{error}</div>}
+      {saved && <div className="success-box small" style={{ padding: 8 }}><CheckCircle size={14} /> Saved!</div>}
+      <button className="btn btn-primary" onClick={save} disabled={saving || photo === student.photo}>
+        <Save size={14} /> {saving ? 'Saving...' : 'Save Photo'}
+      </button>
     </div>
   );
 }
@@ -3153,5 +3308,159 @@ function AIAssistantInline() {
         <button className="btn btn-primary" onClick={send} disabled={busy || !input.trim()}><Send size={14} /></button>
       </div>
     </div>
+  );
+}
+
+// ============================
+// STUDENT DETAIL MODAL (with attendance bar graph)
+// ============================
+function StudentDetailModal({ student, info, onClose, onEdit }) {
+  const [summary, setSummary] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [fees, setFees] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [s, h, f] = await Promise.all([
+          api.get('/attendance/summary/' + student._id),
+          api.get('/attendance/student/' + student._id),
+          api.get('/fees/student/' + student._id).catch(() => ({ data: null })),
+        ]);
+        setSummary(s.data);
+        setHistory(h.data);
+        setFees(f.data);
+      } finally { setLoading(false); }
+    })();
+  }, [student._id]);
+
+  const batch = findBatch(info, student.batchId);
+  const age = ageFromDOB(student.birthday);
+
+  // Build last-30-days bar chart data
+  const today = new Date();
+  const last30 = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    const iso = d.toISOString().substring(0, 10);
+    const rec = history.find(h => h.date === iso);
+    last30.push({
+      date: iso,
+      day: d.getDate(),
+      status: rec ? rec.status : 'none',
+      isSunday: d.getDay() === 0,
+    });
+  }
+
+  return (
+    <Modal onClose={onClose} title="Student Details">
+      <div className="detail-modal">
+        <div className="detail-top">
+          {student.photo
+            ? <img src={student.photo} alt={student.name} className="detail-avatar" />
+            : <div className="detail-avatar placeholder"><User size={32} /></div>}
+          <div style={{ flex: 1 }}>
+            <h2 style={{ margin: '0 0 4px' }}>{student.name}</h2>
+            <p className="muted small" style={{ margin: 0 }}>
+              Roll #{student.rollNumber}{age != null ? ` · Age ${age}` : ''}
+            </p>
+            <div className="row" style={{ gap: 8, marginTop: 8 }}>
+              <button className="btn btn-outline btn-mini" onClick={onEdit}><Edit2 size={12} /> Edit</button>
+              {student.parentPhone && (
+                <a className="btn btn-whatsapp btn-mini" target="_blank" rel="noreferrer"
+                   href={whatsappLink(student.parentPhone, `Hello, this is ${info.teacherName || 'your teacher'} about ${student.name}.`)}>
+                  <MessageCircle size={12} /> WhatsApp Parent
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {loading ? <p className="muted">Loading details…</p> : (
+          <>
+            {/* Attendance graph (last 30 days) */}
+            <div className="info-card">
+              <h3><BarChart3 size={14} /> Attendance — Last 30 Days</h3>
+              {summary && (
+                <div className="row" style={{ gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <div><strong style={{ color: '#16a34a', fontSize: 22 }}>{summary.present}</strong> <span className="muted small">days present</span></div>
+                  <div><strong style={{ color: '#ef4444', fontSize: 22 }}>{summary.absent}</strong> <span className="muted small">days absent</span></div>
+                  <div><strong style={{ color: '#0a84ff', fontSize: 22 }}>{summary.percentage}%</strong> <span className="muted small">attendance</span></div>
+                </div>
+              )}
+              <div className="att-bar-chart">
+                {last30.map((d, i) => (
+                  <div key={i} className="att-bar-wrap" title={`${d.date}: ${d.status}`}>
+                    <div className={'att-bar att-bar-' + d.status + (d.isSunday ? ' sunday' : '')}>
+                      <span className="att-bar-day">{d.day}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="att-legend">
+                <span className="att-legend-item"><span className="att-dot att-bar-present" /> Present</span>
+                <span className="att-legend-item"><span className="att-dot att-bar-absent" /> Absent</span>
+                <span className="att-legend-item"><span className="att-dot att-bar-none" /> Not marked</span>
+                <span className="att-legend-item"><span className="att-dot att-bar-none sunday" /> Sunday (off)</span>
+              </div>
+            </div>
+
+            {/* Personal info */}
+            <div className="info-card">
+              <h3>Personal Info</h3>
+              <dl className="info-dl">
+                {student.phone && <><dt>Phone</dt><dd>{student.phone}</dd></>}
+                {student.birthday && <><dt>Date of Birth</dt><dd>{student.birthday}{age != null ? ` (Age ${age})` : ''}</dd></>}
+                {student.aadhar && <><dt>Aadhar</dt><dd>{student.aadhar}</dd></>}
+                {student.parentName && <><dt>Parent Name</dt><dd>{student.parentName}</dd></>}
+                {student.parentPhone && <><dt>Parent Phone</dt><dd>{student.parentPhone}</dd></>}
+                {student.parentCode && <><dt>Parent Code</dt><dd><code className="inline-code">{student.parentCode}</code></dd></>}
+                {student.className && <><dt>Class</dt><dd>{student.className}</dd></>}
+                {batch && <><dt>Batch</dt><dd>{batch.name} ({batch.startTime}-{batch.endTime})</dd></>}
+                {student.subjects?.length > 0 && <><dt>Subjects</dt><dd>{student.subjects.join(', ')}</dd></>}
+                {student.enrollmentDate && <><dt>Enrolled</dt><dd>{student.enrollmentDate}</dd></>}
+                {student.notes && <><dt>Notes</dt><dd>{student.notes}</dd></>}
+              </dl>
+            </div>
+
+            {/* Fees */}
+            {fees?.fees && (
+              <div className="info-card">
+                <h3><IndianRupee size={14} /> Fees ({fees.fees.year}-{String(fees.fees.month).padStart(2, '0')})</h3>
+                <dl className="info-dl">
+                  <dt>Monthly Fee</dt><dd>{formatRupee(fees.fees.monthlyFee || 0)}</dd>
+                  <dt>Working Days</dt><dd>{fees.fees.workingDays} of {fees.fees.totalDays}</dd>
+                  <dt>Per Working Day</dt><dd>{formatRupee(Math.round(fees.fees.perDay || 0))}</dd>
+                </dl>
+                {(!fees.fees.monthlyFee) && <p className="small muted">No fee set — edit the student to add one.</p>}
+              </div>
+            )}
+
+            {/* Attendance history */}
+            <div className="info-card">
+              <h3>Recent Attendance ({history.length})</h3>
+              {history.length === 0 ? <p className="muted small">No records yet.</p> : (
+                <div className="list" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  {history.slice(0, 50).map(h => (
+                    <div key={h._id} className="history-row">
+                      <div>
+                        <strong>{formatDate(h.date)}</strong>
+                        {h.status === 'present' ? (
+                          <span className="badge green small"><CheckCircle size={12} /> Present {h.inTime && `· ${h.inTime}`}</span>
+                        ) : (
+                          <span className="badge red small"><XCircle size={12} /> Absent {h.reason && `· ${h.reason}`}</span>
+                        )}
+                        {h.note && <p className="small muted" style={{ marginTop: 4 }}>"{h.note}"</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }

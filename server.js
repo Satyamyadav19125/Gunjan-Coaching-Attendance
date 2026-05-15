@@ -98,7 +98,8 @@ const StudentSchema = new mongoose.Schema({
   birthday: String,
   photo: String, // base64 data URL (small, capped at ~200KB by frontend)
   subjects: { type: [String], default: [] }, // subject names; just for organization, no fee impact
-  className: { type: String, default: '' },   // name of the class (fees come from Config.classes)
+  className: { type: String, default: '' },   // name of the class (just a label now)
+  monthlyFee: { type: Number, default: 0 },   // fee set manually per student by teacher
   batchId: { type: String, default: '' },     // _id of a Config.batches entry, or '' for none
   parentCode: { type: String, index: true },  // unique code for parent login (no other password needed)
   notes: String,
@@ -625,9 +626,16 @@ app.post('/api/attendance/check', authenticate, async (req, res) => {
 
 // Student-mode mark: teacher's session, but markedBy='self' because the student
 // physically tapped their own name on the teacher's device.
-app.post('/api/attendance/self-mark', authenticate, teacherOnly, async (req, res) => {
+// Self-mark: student marks themselves present (or teacher does it for them).
+// When called by a student, they can only mark their own studentId.
+app.post('/api/attendance/self-mark', authenticate, async (req, res) => {
   try {
-    const { studentId, note } = req.body;
+    let { studentId, note } = req.body;
+    if (req.user.role === 'student') {
+      studentId = req.user.studentId; // students can only mark themselves
+    } else if (req.user.role !== 'teacher') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     if (!studentId) return res.status(400).json({ error: 'studentId required' });
     const today = istDateISO();
     const timeStr = istTimeHM();
@@ -645,6 +653,48 @@ app.post('/api/attendance/self-mark', authenticate, teacherOnly, async (req, res
     }
     await attendance.save();
     res.json(attendance);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Student marks themselves present from THEIR OWN login (roll number).
+// Used when student opens the app on teacher's phone after physically arriving.
+app.post('/api/attendance/student-mark', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'student') return res.status(403).json({ error: 'Student only' });
+    const today = istDateISO();
+    const timeStr = istTimeHM();
+    let attendance = await Attendance.findOne({ studentId: req.user.studentId, date: today });
+    if (!attendance) {
+      attendance = new Attendance({
+        studentId: req.user.studentId, date: today, status: 'present', markedBy: 'self', inTime: timeStr,
+        note: (req.body.note || '').trim() || undefined,
+      });
+    } else if (attendance.status === 'absent') {
+      attendance.status = 'present';
+      attendance.markedBy = 'self';
+      attendance.inTime = timeStr;
+      if (req.body.note) attendance.note = req.body.note;
+    } else {
+      return res.status(200).json({ already: true, attendance });
+    }
+    await attendance.save();
+    res.json({ ok: true, attendance });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Student updates their own photo
+app.post('/api/students/me/photo', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'student') return res.status(403).json({ error: 'Student only' });
+    const { photo } = req.body;
+    if (typeof photo !== 'string') return res.status(400).json({ error: 'photo required' });
+    if (photo.length > 600000) return res.status(413).json({ error: 'Photo too large (max ~400KB)' });
+    await Student.findByIdAndUpdate(req.user.studentId, { photo });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -853,9 +903,8 @@ const computeStudentFees = (student, config, yyyymm) => {
 
   const { working, total } = workingDaysInMonth(year, month, offDays);
 
-  // Fee is taken from the student's class.
-  const cls = (config?.classes || []).find(c => c.name === student.className);
-  const monthlyFee = cls ? Number(cls.monthlyFee) || 0 : 0;
+  // Manual fee per student (set by teacher when adding/editing the student).
+  const monthlyFee = Number(student.monthlyFee) || 0;
   const perDay = working ? monthlyFee / working : 0;
 
   return {
@@ -1081,7 +1130,21 @@ app.get('/api/chat/messages', authenticate, async (req, res) => {
     if (!['teacher', 'student'].includes(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
     const since = req.query.since;
     const filter = since ? { createdAt: { $gt: new Date(since) } } : {};
-    const messages = await ChatMessage.find(filter).sort({ createdAt: 1 }).limit(200);
+    const messages = await ChatMessage.find(filter).sort({ createdAt: 1 }).limit(200).lean();
+
+    // Enrich: for student messages missing a photo, look up the current photo.
+    const studentIds = [...new Set(messages.filter(m => m.role === 'student' && !m.photo && m.studentId).map(m => String(m.studentId)))];
+    if (studentIds.length) {
+      const students = await Student.find({ _id: { $in: studentIds } }).select('_id photo').lean();
+      const photoMap = {};
+      students.forEach(s => { if (s.photo) photoMap[String(s._id)] = s.photo; });
+      messages.forEach(m => {
+        if (m.role === 'student' && !m.photo && m.studentId && photoMap[String(m.studentId)]) {
+          m.photo = photoMap[String(m.studentId)];
+        }
+      });
+    }
+
     res.json({ messages });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1196,7 +1259,7 @@ ${context}`;
       return res.status(400).json({ error: 'Last message must be from user' });
     }
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
     const body = {
       system_instruction: { parts: [{ text: systemPrompt }] },
       contents: sanitized,

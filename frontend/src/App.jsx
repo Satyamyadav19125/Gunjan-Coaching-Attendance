@@ -186,7 +186,7 @@ export default function App() {
   }} />;
   if (view === 'teacher') return <TeacherDashboard info={info} announcements={announcements} onSignOut={handleSignOut} refreshInfo={refreshInfo} />;
   if (view === 'parent') return <ParentDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
-  if (view === 'student') return <StudentChatDashboard student={selectedStudent} info={info} onSignOut={handleSignOut} />;
+  if (view === 'student') return <StudentChatDashboard student={selectedStudent} info={info} announcements={announcements} onSignOut={handleSignOut} />;
   return null;
 }
 
@@ -583,7 +583,7 @@ function PhotoCapture({ value, onChange }) {
           <button type="button" className="btn btn-outline" onClick={startCamera}>
             <Camera size={14} /> Take Photo
           </button>
-          <input ref={fileRef} type="file" accept="image/*" capture="user" style={{ display: 'none' }} onChange={onFile} />
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFile} />
           <button type="button" className="btn btn-outline" onClick={() => fileRef.current?.click()}>
             Upload
           </button>
@@ -692,9 +692,12 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
         <button className={tab === 'today' ? 'tab active' : 'tab'} onClick={() => setTab('today')}><Calendar size={16} /> Today</button>
         <button className={tab === 'students' ? 'tab active' : 'tab'} onClick={() => setTab('students')}><Users size={16} /> Students</button>
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
+        <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
+        <button className={tab === 'exams' ? 'tab active' : 'tab'} onClick={() => setTab('exams')}><BookOpen size={16} /> Exams</button>
+        <button className={tab === 'holidays' ? 'tab active' : 'tab'} onClick={() => setTab('holidays')}><CalendarOff size={16} /> Holidays</button>
         <button className={tab === 'chat' ? 'tab active' : 'tab'} onClick={() => setTab('chat')}><MessageCircle size={16} /> Chat</button>
         <button className={tab === 'messages' ? 'tab active' : 'tab'} onClick={() => setTab('messages')}>
-          <Inbox size={16} /> Parent Msgs
+          <Inbox size={16} /> Parent Chats
           {unreadMsgs > 0 && <span className="tab-badge">{unreadMsgs}</span>}
         </button>
         <button className={tab === 'settings' ? 'tab active' : 'tab'} onClick={() => setTab('settings')}><Settings size={16} /> Settings</button>
@@ -704,12 +707,15 @@ function TeacherDashboard({ info, announcements, onSignOut, refreshInfo }) {
         {tab === 'today' && <TodayTab info={info} announcements={announcements} />}
         {tab === 'students' && <StudentsTab info={info} refreshInfo={refreshInfo} />}
         {tab === 'summary' && <SummaryTab info={info} />}
+        {tab === 'fees' && <TeacherFeesTab info={info} />}
+        {tab === 'exams' && <ExamsTab />}
+        {tab === 'holidays' && <AnnouncementsTab info={info} />}
         {tab === 'chat' && <GroupChat role="teacher" currentName={info.teacherName || 'Teacher'} />}
-        {tab === 'messages' && <ParentMessagesInbox onUpdate={setUnreadMsgs} />}
+        {tab === 'messages' && <ParentChatTab />}
         {tab === 'settings' && <SettingsTab info={info} refreshInfo={refreshInfo} />}
       </main>
 
-      <AIAssistant />
+      <AIAssistant chatMode={tab === 'chat' || tab === 'messages'} />
     </div>
   );
 }
@@ -1240,8 +1246,8 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
   useEffect(() => { if (refreshInfo) refreshInfo(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [form, setForm] = useState(student || {
-    name: '', phone: '', parentName: '', parentPhone: '',
-    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: '', photo: '', monthlyFee: 0
+    name: '', phone: '', parentName: '', motherName: '', parentPhone: '',
+    aadhar: '', birthday: '', subjects: [], notes: '', batchId: '', className: '', photo: '', monthlyFee: 0, feeDueDay: 5
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1283,8 +1289,10 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
       <input value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} />
       <label>Date of Birth {age != null && <span className="age-tag">Age {age}</span>}</label>
       <input type="date" value={form.birthday || ''} onChange={e => setForm({...form, birthday: e.target.value})} />
-      <label>Parent Name</label>
+      <label>Parent / Father Name</label>
       <input value={form.parentName || ''} onChange={e => setForm({...form, parentName: e.target.value})} />
+      <label>Mother Name</label>
+      <input value={form.motherName || ''} onChange={e => setForm({...form, motherName: e.target.value})} />
       <label>Parent Phone</label>
       <input value={form.parentPhone || ''} onChange={e => setForm({...form, parentPhone: e.target.value})} />
       <label>
@@ -1306,6 +1314,15 @@ function StudentForm({ info, student, onClose, onSaved, refreshInfo }) {
         value={form.monthlyFee || 0}
         onChange={e => setForm({ ...form, monthlyFee: Number(e.target.value) || 0 })}
         placeholder="e.g. 5000"
+      />
+
+      <label>Fee Due Day <span className="small muted">— day of the month when fee is due (1-28)</span></label>
+      <input
+        type="number"
+        min="1"
+        max="28"
+        value={form.feeDueDay || 5}
+        onChange={e => setForm({ ...form, feeDueDay: Math.min(28, Math.max(1, Number(e.target.value) || 5)) })}
       />
 
       <label>Batch</label>
@@ -2435,8 +2452,8 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
     <div className="page">
       <header className="dashboard-header">
         <div>
-          <h1 className="display">{student?.name}'s Attendance</h1>
-          <p className="muted">Roll #{student?.rollNumber}</p>
+          <h1 className="display">Welcome{student?.parentName ? ', ' + student.parentName : ''}{student?.motherName ? ' & ' + student.motherName : ''}!</h1>
+          <p className="muted">{student?.name} · Roll #{student?.rollNumber}{student?.className ? ' · ' + student.className : ''}</p>
         </div>
         <div className="row">
           <button className="btn btn-outline btn-mini" onClick={load} title="Refresh"><RefreshCw size={14} /></button>
@@ -2444,13 +2461,17 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
         </div>
       </header>
 
+      <FeesReminderBanner />
+
       <OffDayBanner announcements={announcements} batchId={student?.batchId} />
 
       <nav className="tabs">
         <button className={tab === 'summary' ? 'tab active' : 'tab'} onClick={() => setTab('summary')}><BarChart3 size={16} /> Summary</button>
         <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}><Calendar size={16} /> History</button>
         <button className={tab === 'fees' ? 'tab active' : 'tab'} onClick={() => setTab('fees')}><Wallet size={16} /> Fees</button>
-        <button className={tab === 'message' ? 'tab active' : 'tab'} onClick={() => setTab('message')}><MessageSquare size={16} /> Message Teacher</button>
+        <button className={tab === 'exams' ? 'tab active' : 'tab'} onClick={() => setTab('exams')}><BookOpen size={16} /> Exams</button>
+        <button className={tab === 'holidays' ? 'tab active' : 'tab'} onClick={() => setTab('holidays')}><CalendarOff size={16} /> Holidays</button>
+        <button className={tab === 'chat' ? 'tab active' : 'tab'} onClick={() => setTab('chat')}><MessageCircle size={16} /> Chat with Teacher</button>
         <button className={tab === 'info' ? 'tab active' : 'tab'} onClick={() => setTab('info')}><Info size={16} /> Class Info</button>
       </nav>
 
@@ -2573,11 +2594,13 @@ function ParentDashboard({ student, info, announcements, onSignOut }) {
         )}
 
         {tab === 'announcements' && <AnnouncementList announcements={announcements} info={info} />}
-        {tab === 'message' && <ParentMessageCompose />}
+        {tab === 'holidays' && <AnnouncementList announcements={announcements} info={info} />}
+        {tab === 'exams' && <div><h3><BookOpen size={16} /> Exams & Tests</h3><ExamList /></div>}
+        {tab === 'chat' && <ParentTeacherChat studentId={student._id} role="parent" currentName={student?.parentName || 'Parent'} />}
         {tab === 'info' && <ClassInfo info={info} student={student} />}
       </main>
 
-      <AIAssistant />
+      <AIAssistant chatMode={tab === 'chat'} />
     </div>
   );
 }
@@ -2691,7 +2714,7 @@ function AIAvatar({ size = 32 }) {
 // ============================
 // AI ASSISTANT (request #15)
 // ============================
-function AIAssistant() {
+function AIAssistant({ chatMode }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -2726,7 +2749,7 @@ function AIAssistant() {
 
   if (!open) {
     return (
-      <button className="ai-fab" onClick={() => setOpen(true)} title="AI Assistant" aria-label="Open AI Assistant">
+      <button className={'ai-fab' + (chatMode ? ' chat-mode' : '')} onClick={() => setOpen(true)} title="AI Assistant" aria-label="Open AI Assistant">
         <AIAvatar size={38} />
       </button>
     );
@@ -2802,6 +2825,7 @@ function GroupChat({ role, currentName }) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [profileFor, setProfileFor] = useState(null);
   const scrollRef = useRef(null);
   const lastTsRef = useRef(null);
 
@@ -2861,10 +2885,11 @@ function GroupChat({ role, currentName }) {
         {messages.map(m => {
           const mine = (role === 'teacher' && m.role === 'teacher') || (role !== 'teacher' && m.name === currentName);
           const isTeacher = m.role === 'teacher';
+          const handleProfile = () => { if (!isTeacher && m.studentId) setProfileFor(m.studentId); };
           return (
             <div key={m._id} className={'chat-row ' + (mine ? 'me' : 'them')}>
               {!mine && (
-                <div className="chat-avatar">
+                <div className="chat-avatar" onClick={handleProfile}>
                   {isTeacher
                     ? <div className="chat-avatar-teacher"><GraduationCap size={16} /></div>
                     : m.photo
@@ -2874,7 +2899,7 @@ function GroupChat({ role, currentName }) {
               )}
               <div className={'chat-msg ' + (mine ? 'me' : isTeacher ? 'teacher' : '')}>
                 <div className="chat-meta">
-                  <strong>{m.name}</strong>
+                  <strong onClick={handleProfile}>{m.name}</strong>
                   {isTeacher && <span className="chat-tag">Teacher</span>}
                   {m.rollNumber && !mine && <span className="muted small"> #{m.rollNumber}</span>}
                   <span className="muted small chat-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -2905,6 +2930,7 @@ function GroupChat({ role, currentName }) {
         />
         <button className="btn btn-primary" onClick={send} disabled={sending || !input.trim()}><Send size={14} /></button>
       </div>
+      {profileFor && <ProfileModal studentId={profileFor} onClose={() => setProfileFor(null)} />}
     </div>
   );
 }
@@ -3093,7 +3119,7 @@ function ComplaintCompose() {
 // ============================
 // STUDENT CHAT DASHBOARD (request #14, #16)
 // ============================
-function StudentChatDashboard({ student, info, onSignOut }) {
+function StudentChatDashboard({ student, info, announcements, onSignOut }) {
   const [tab, setTab] = useState('mark');
 
   return (
@@ -3109,16 +3135,22 @@ function StudentChatDashboard({ student, info, onSignOut }) {
         <button className="btn btn-outline" onClick={onSignOut}><LogOut size={14} /> Sign out</button>
       </header>
 
+      <OffDayBanner announcements={announcements} batchId={student?.batchId} />
+
       <nav className="dash-nav">
         <button className={tab === 'mark' ? 'active' : ''} onClick={() => setTab('mark')}><CheckCircle size={14} /> Mark Present</button>
         <button className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}><MessageCircle size={14} /> Group Chat</button>
+        <button className={tab === 'exams' ? 'active' : ''} onClick={() => setTab('exams')}><BookOpen size={14} /> Exams</button>
+        <button className={tab === 'holidays' ? 'active' : ''} onClick={() => setTab('holidays')}><CalendarOff size={14} /> Holidays</button>
         <button className={tab === 'ai' ? 'active' : ''} onClick={() => setTab('ai')}><Sparkles size={14} /> AI Help</button>
-        <button className={tab === 'profile' ? 'active' : ''} onClick={() => setTab('profile')}><User size={14} /> My Photo</button>
+        <button className={tab === 'profile' ? 'active' : ''} onClick={() => setTab('profile')}><User size={14} /> My Profile</button>
       </nav>
 
       <main className="dash-main">
         {tab === 'mark' && <StudentMarkPresent student={student} />}
         {tab === 'chat' && <GroupChat role="student" currentName={student?.name} />}
+        {tab === 'exams' && <div className="container-narrow"><h3><BookOpen size={16} /> Exams & Tests</h3><ExamList /></div>}
+        {tab === 'holidays' && <div className="container-narrow"><h3><CalendarOff size={16} /> Holidays & Announcements</h3><AnnouncementList announcements={announcements || []} info={info} /></div>}
         {tab === 'ai' && (
           <div className="container-narrow">
             <h3><Sparkles size={16} /> AI Help</h3>
@@ -3126,7 +3158,13 @@ function StudentChatDashboard({ student, info, onSignOut }) {
             <AIAssistantInline />
           </div>
         )}
-        {tab === 'profile' && <StudentProfilePhoto student={student} />}
+        {tab === 'profile' && (
+          <div>
+            <StudentProfilePhoto student={student} />
+            <hr />
+            <StudentBioEditor student={student} />
+          </div>
+        )}
       </main>
     </div>
   );
@@ -3462,5 +3500,513 @@ function StudentDetailModal({ student, info, onClose, onEdit }) {
         )}
       </div>
     </Modal>
+  );
+}
+
+// ============================
+// v6: PROFILE MODAL, FEES, EXAMS, PARENT CHAT
+// ============================
+
+// Fullscreen photo viewer
+function PhotoViewer({ src, onClose }) {
+  if (!src) return null;
+  return (
+    <div className="photo-viewer" onClick={onClose}>
+      <img src={src} alt="" />
+    </div>
+  );
+}
+
+// Profile modal - shown when tapping student name/avatar in chat or anywhere
+function ProfileModal({ studentId, onClose }) {
+  const [profile, setProfile] = useState(null);
+  const [err, setErr] = useState('');
+  const [showPhoto, setShowPhoto] = useState(false);
+
+  useEffect(() => {
+    api.get('/students/' + studentId + '/profile')
+      .then(r => setProfile(r.data))
+      .catch(e => setErr(e.response?.data?.error || 'Could not load profile'));
+  }, [studentId]);
+
+  if (!studentId) return null;
+
+  return (
+    <Modal onClose={onClose} title="">
+      {err && <div className="error-box">{err}</div>}
+      {!profile && !err && <p className="muted">Loading…</p>}
+      {profile && (
+        <div className="profile-modal-content">
+          {profile.photo ? (
+            <img
+              src={profile.photo}
+              alt={profile.name}
+              className="profile-modal-photo"
+              onClick={() => setShowPhoto(true)}
+            />
+          ) : (
+            <div className="profile-modal-photo placeholder"><User size={48} /></div>
+          )}
+          <h2 className="display" style={{ margin: 0 }}>{profile.name}</h2>
+          <p className="muted small">Roll #{profile.rollNumber}{profile.className ? ' · ' + profile.className : ''}</p>
+          {profile.batch && (
+            <p className="profile-meta">
+              <Clock size={14} /> Batch <strong>{profile.batch.name}</strong> · {profile.batch.startTime}–{profile.batch.endTime}
+            </p>
+          )}
+          {profile.bio && <div className="profile-modal-bio">{profile.bio}</div>}
+          {profile.instagram && (
+            <a
+              href={profile.instagram.startsWith('http') ? profile.instagram : ('https://instagram.com/' + profile.instagram.replace('@', ''))}
+              target="_blank" rel="noreferrer"
+              className="profile-insta"
+            >
+              📸 Instagram
+            </a>
+          )}
+        </div>
+      )}
+      {showPhoto && profile?.photo && <PhotoViewer src={profile.photo} onClose={() => setShowPhoto(false)} />}
+    </Modal>
+  );
+}
+
+// Student edits their own bio/Instagram
+function StudentBioEditor({ student }) {
+  const [bio, setBio] = useState(student.bio || '');
+  const [insta, setInsta] = useState(student.instagram || '');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState('');
+
+  const save = async () => {
+    setSaving(true); setErr('');
+    try {
+      await api.put('/students/me', { bio, instagram: insta });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setErr(e.response?.data?.error || 'Could not save');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="container-narrow">
+      <h3>My Bio</h3>
+      <p className="small muted">This shows on your profile when classmates tap your name in chat.</p>
+      <label>About me</label>
+      <textarea
+        rows={4}
+        value={bio}
+        onChange={e => setBio(e.target.value.slice(0, 500))}
+        placeholder="Tell everyone about yourself…"
+      />
+      <p className="small muted text-right">{bio.length}/500</p>
+
+      <label>Instagram (optional)</label>
+      <input
+        value={insta}
+        onChange={e => setInsta(e.target.value)}
+        placeholder="@yourhandle or full URL"
+      />
+
+      {err && <div className="error-box">{err}</div>}
+      {saved && <div className="success-box small" style={{ padding: 8 }}><CheckCircle size={14} /> Saved!</div>}
+      <button className="btn btn-primary" onClick={save} disabled={saving}>
+        <Save size={14} /> {saving ? 'Saving…' : 'Save'}
+      </button>
+    </div>
+  );
+}
+
+// Pending fees tab for teacher
+function PendingFeesTab() {
+  const [month, setMonth] = useState(new Date().toISOString().substring(0, 7));
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [marking, setMarking] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/fees/pending', { params: { month } });
+      setData(r.data);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, [month]);
+
+  const markPaid = async (s) => {
+    setMarking(s._id);
+    try {
+      await api.post('/fees/mark-paid', { studentId: s._id, month, amount: s.monthlyFee });
+      await load();
+    } catch (e) {
+      alert('Failed: ' + (e.response?.data?.error || e.message));
+    } finally { setMarking(null); }
+  };
+
+  if (loading) return <p className="muted">Loading…</p>;
+
+  return (
+    <div>
+      <div className="row">
+        <label style={{ margin: 0 }}>Month:</label>
+        <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="sort-select" />
+        <button className="btn btn-outline btn-mini" onClick={load}><RefreshCw size={12} /></button>
+      </div>
+
+      <div className="summary-stats">
+        <div className="stat-big green"><strong>{data?.totalPaid || 0}</strong><span>Paid</span></div>
+        <div className="stat-big red"><strong>{data?.totalPending || 0}</strong><span>Pending</span></div>
+      </div>
+
+      {data?.pending?.length === 0 ? (
+        <div className="empty"><CheckCircle size={48} color="#16a34a" /><h3>All fees collected!</h3><p className="muted">Everyone has paid this month.</p></div>
+      ) : (
+        <div className="pending-fees-list">
+          {data?.pending?.map(s => (
+            <div key={s._id} className={'pending-fee-row' + (s.overdue ? ' overdue' : '')}>
+              <div className="row" style={{ gap: 12, alignItems: 'center', flex: 1 }}>
+                {s.photo ? <img src={s.photo} alt="" className="student-avatar" /> : <div className="student-avatar placeholder"><User size={20} /></div>}
+                <div>
+                  <strong>{s.name}</strong>
+                  <p className="small muted" style={{ margin: '2px 0 0' }}>
+                    Roll #{s.rollNumber} · {formatRupee(s.monthlyFee)} · Due day {s.dueDay}
+                    {s.overdue && <span className="badge red small" style={{ marginLeft: 8 }}>OVERDUE</span>}
+                  </p>
+                </div>
+              </div>
+              <div className="row" style={{ gap: 6 }}>
+                {s.parentPhone && (
+                  <a className="btn btn-whatsapp btn-mini" target="_blank" rel="noreferrer"
+                    href={whatsappLink(s.parentPhone, `Hi, this is a reminder that ${s.name}'s fee of ${formatRupee(s.monthlyFee)} for ${month} is pending. Please pay at your earliest convenience.`)}>
+                    <MessageCircle size={12} /> Remind
+                  </a>
+                )}
+                <button className="btn btn-green btn-mini" onClick={() => markPaid(s)} disabled={marking === s._id}>
+                  <Check size={12} /> {marking === s._id ? '…' : 'Mark Paid'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Exams tab — teacher creates, sends to selected students
+function ExamsTab() {
+  const [exams, setExams] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ title: '', description: '', examDate: '', studentIds: [] });
+  const [allSelected, setAllSelected] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const load = async () => {
+    const [e, s] = await Promise.all([api.get('/exams'), api.get('/students')]);
+    setExams(e.data.exams || []);
+    setStudents(s.data || []);
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    setErr(''); setSaving(true);
+    try {
+      await api.post('/exams', {
+        ...form,
+        studentIds: allSelected ? [] : form.studentIds, // empty = all
+      });
+      setShowForm(false);
+      setForm({ title: '', description: '', examDate: '', studentIds: [] });
+      setAllSelected(true);
+      load();
+    } catch (e) { setErr(e.response?.data?.error || 'Failed'); }
+    finally { setSaving(false); }
+  };
+
+  const del = async (id) => {
+    if (!confirm('Delete this exam?')) return;
+    await api.delete('/exams/' + id);
+    load();
+  };
+
+  const toggleStudent = (id) => {
+    setForm(f => ({
+      ...f,
+      studentIds: f.studentIds.includes(id) ? f.studentIds.filter(x => x !== id) : [...f.studentIds, id]
+    }));
+  };
+
+  return (
+    <div>
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h3><BookOpen size={16} /> Exams & Tests</h3>
+        <button className="btn btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> New Exam</button>
+      </div>
+
+      {exams.length === 0 ? (
+        <p className="muted small">No exams yet. Create one to notify students.</p>
+      ) : (
+        <div className="list">
+          {exams.map(e => (
+            <div key={e._id} className="student-card">
+              <div style={{ flex: 1 }}>
+                <strong>{e.title}</strong>
+                {e.examDate && <span className="badge small" style={{ marginLeft: 8 }}>{e.examDate}</span>}
+                {e.description && <p className="small" style={{ marginTop: 4 }}>{e.description}</p>}
+                <p className="small muted">
+                  Sent to {e.studentIds?.length ? `${e.studentIds.length} selected student(s)` : 'all students'} ·{' '}
+                  {new Date(e.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <button className="icon-btn icon-btn-danger" onClick={() => del(e._id)}><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <Modal onClose={() => setShowForm(false)} title="New Exam / Test">
+          <label>Title *</label>
+          <input value={form.title} onChange={ev => setForm({ ...form, title: ev.target.value })} placeholder="e.g. Math Class Test" />
+          <label>Date</label>
+          <input type="date" value={form.examDate} onChange={ev => setForm({ ...form, examDate: ev.target.value })} />
+          <label>Description</label>
+          <textarea rows={3} value={form.description} onChange={ev => setForm({ ...form, description: ev.target.value })} placeholder="Syllabus, topics, instructions…" />
+
+          <label>Send to</label>
+          <div className="row">
+            <label className="checkbox-label">
+              <input type="checkbox" checked={allSelected} onChange={ev => setAllSelected(ev.target.checked)} />
+              <span>All students</span>
+            </label>
+          </div>
+          {!allSelected && (
+            <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
+              {students.map(s => (
+                <label key={s._id} className="checkbox-label" style={{ display: 'block' }}>
+                  <input type="checkbox" checked={form.studentIds.includes(s._id)} onChange={() => toggleStudent(s._id)} />
+                  <span>{s.name} (Roll #{s.rollNumber})</span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {err && <div className="error-box">{err}</div>}
+          <button className="btn btn-primary btn-block" onClick={save} disabled={saving || !form.title}>
+            <Send size={14} /> {saving ? 'Sending…' : 'Send to Students'}
+          </button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Student/parent: see their exam list
+function ExamList() {
+  const [exams, setExams] = useState([]);
+  useEffect(() => { api.get('/exams').then(r => setExams(r.data.exams || [])).catch(() => {}); }, []);
+  if (exams.length === 0) return <p className="muted small">No upcoming exams.</p>;
+  return (
+    <div className="list">
+      {exams.map(e => (
+        <div key={e._id} className="student-card">
+          <div style={{ flex: 1 }}>
+            <strong>{e.title}</strong>
+            {e.examDate && <span className="badge small" style={{ marginLeft: 8 }}>{e.examDate}</span>}
+            {e.description && <p className="small" style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{e.description}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Parent ↔ Teacher chat (WhatsApp-style two-way)
+function ParentTeacherChat({ studentId, role, currentName }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef(null);
+
+  const load = async () => {
+    try {
+      const r = await api.get('/parent-chat/' + studentId);
+      setMessages(r.data.messages || []);
+    } catch (e) {}
+  };
+
+  useEffect(() => { load(); }, [studentId]);
+  useEffect(() => {
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, [studentId]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  // teacher: mark all as read on open
+  useEffect(() => {
+    if (role === 'teacher') {
+      api.post('/parent-chat/' + studentId + '/mark-read').catch(() => {});
+    }
+  }, [studentId, role]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setSending(true);
+    try {
+      const body = role === 'teacher' ? { text, studentId } : { text };
+      const r = await api.post('/parent-chat/send', body);
+      setMessages(m => [...m, r.data.message]);
+      setInput('');
+    } catch (e) {
+      alert(e.response?.data?.error || 'Failed to send');
+    } finally { setSending(false); }
+  };
+
+  const deleteMsg = async (id) => {
+    if (!confirm('Delete this message for yourself? (The other person will still see it.)')) return;
+    await api.post('/parent-chat/' + id + '/delete');
+    setMessages(m => m.filter(x => x._id !== id));
+  };
+
+  return (
+    <div className="chat-shell">
+      <div className="chat-header">
+        <h3 style={{ margin: 0 }}><MessageCircle size={16} /> Chat with {role === 'teacher' ? 'Parent' : 'Teacher'}</h3>
+        <p className="small muted" style={{ margin: 0 }}>Private 1-on-1 conversation. Delete only removes from your side.</p>
+      </div>
+      <div className="chat-body" ref={scrollRef}>
+        {messages.length === 0 && <p className="muted small">No messages yet. Say hi.</p>}
+        {messages.map(m => {
+          const mine = (role === 'teacher' && m.from === 'teacher') || (role === 'parent' && m.from === 'parent');
+          return (
+            <div key={m._id} className={'chat-row ' + (mine ? 'me' : 'them')}>
+              <div className={'chat-msg ' + (mine ? 'me' : '')}>
+                <div className="chat-meta">
+                  <strong>{m.from === 'teacher' ? 'Teacher' : (m.studentName + "'s parent")}</strong>
+                  <span className="muted small chat-time">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <div className="chat-text">{m.text}</div>
+                {mine && (
+                  <button className="btn-link small" onClick={() => deleteMsg(m._id)} style={{ marginTop: 2, opacity: 0.6 }}>
+                    <Trash2 size={10} /> delete
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="chat-input-row">
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Type a message…"
+          maxLength={2000}
+        />
+        <button className="btn btn-primary" onClick={send} disabled={sending || !input.trim()}><Send size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+// Teacher: list of parent conversations
+function ParentConversationsList({ onSelect }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/parent-chat-list');
+      setList(r.data.conversations || []);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, []);
+
+  if (loading) return <p className="muted">Loading…</p>;
+  if (list.length === 0) return <div className="empty"><Inbox size={48} color="#999" /><h3>No conversations yet</h3><p className="muted">When a parent messages you, it'll appear here.</p></div>;
+
+  return (
+    <div className="parent-conv-list">
+      {list.map(c => (
+        <div key={c._id} className="parent-conv" onClick={() => onSelect(c.student)}>
+          {c.student?.photo ? <img src={c.student.photo} className="parent-conv-avatar" alt="" /> : <div className="parent-conv-avatar" />}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <strong>{c.student?.name}</strong>{c.student?.rollNumber ? <span className="muted small"> · Roll {c.student.rollNumber}</span> : null}
+            <p className="parent-conv-preview">{c.lastFrom === 'teacher' ? 'You: ' : ''}{c.lastMessage}</p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p className="muted small" style={{ margin: 0 }}>{new Date(c.lastAt).toLocaleDateString()}</p>
+            {c.unread > 0 && <span className="parent-conv-badge">{c.unread}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Wrapper for teacher's parent-chat tab
+function ParentChatTab() {
+  const [selected, setSelected] = useState(null);
+  if (selected) {
+    return (
+      <div>
+        <button className="btn btn-outline btn-mini" onClick={() => setSelected(null)}><ArrowLeft size={12} /> Back to list</button>
+        <ParentTeacherChat studentId={selected._id} role="teacher" currentName="Teacher" />
+      </div>
+    );
+  }
+  return <ParentConversationsList onSelect={setSelected} />;
+}
+
+// Teacher Fees tab: switches between "Overview" (all students) and "Pending"
+function TeacherFeesTab({ info }) {
+  const [sub, setSub] = useState('overview');
+  return (
+    <div>
+      <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+        <button className={'btn btn-mini ' + (sub === 'overview' ? 'btn-primary' : 'btn-outline')} onClick={() => setSub('overview')}>Overview</button>
+        <button className={'btn btn-mini ' + (sub === 'pending' ? 'btn-primary' : 'btn-outline')} onClick={() => setSub('pending')}><AlertCircle size={12} /> Pending</button>
+      </div>
+      {sub === 'overview' && <FeesTab info={info} />}
+      {sub === 'pending' && <PendingFeesTab />}
+    </div>
+  );
+}
+
+// Parent-side fees reminder shown 5 days before due / when overdue
+function FeesReminderBanner() {
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    api.get('/fees/my-status').then(r => setStatus(r.data)).catch(() => {});
+  }, []);
+  if (!status || !status.hasFee || status.paid || !status.showReminder) return null;
+  return (
+    <div className={'fees-pending-banner' + (status.overdue ? ' fees-overdue-banner' : '')}>
+      <Wallet size={20} />
+      <div style={{ flex: 1 }}>
+        <strong>
+          {status.overdue
+            ? `Fee payment is overdue!`
+            : (status.daysUntilDue <= 0
+                ? `Fee is due today`
+                : `Fee due in ${status.daysUntilDue} day${status.daysUntilDue === 1 ? '' : 's'}`)}
+        </strong>
+        <p className="small" style={{ margin: '2px 0 0' }}>
+          {formatRupee(status.amount)} for {status.month} · due on day {status.dueDay} of the month
+        </p>
+      </div>
+    </div>
   );
 }

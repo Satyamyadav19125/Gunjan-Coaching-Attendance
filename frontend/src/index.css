@@ -1738,3 +1738,179 @@ textarea { resize: vertical; min-height: 60px; }
   font-size: 18px;
 }
 @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+/* =====================================================
+   v6: Attendance bar chart for student detail
+   ===================================================== */
+.detail-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.detail-top {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 4px 0;
+}
+.att-bar-chart {
+  display: grid;
+  grid-template-columns: repeat(15, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+}
+.att-bar-wrap {
+  position: relative;
+  aspect-ratio: 1;
+}
+.att-bar {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+.att-bar-day {
+  font-size: 10px;
+  color: rgba(255,255,255,0.85);
+}
+.att-bar-present {
+  background: #16a34a;
+  color: #fff;
+}
+.att-bar-absent {
+  background: #ef4444;
+  color: #fff;
+}
+.att-bar-none {
+  background: #e5e7eb;
+  color: #6b7280;
+}
+.att-bar.sunday {
+  background: repeating-linear-gradient(45deg, #d1d5db 0, #d1d5db 4px, #e5e7eb 4px, #e5e7eb 8px);
+  color: #6b7280;
+}
+.att-bar.sunday.att-bar-present { background: #15803d; color: #fff; }
+.att-legend {
+  margin-top: 12px;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #475569;
+}
+.att-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.att-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+@media (max-width: 480px) {
+  .att-bar-chart { grid-template-columns: repeat(10, 1fr); }
+  .att-bar-day { font-size: 9px; }
+}
+
+/* =====================================================
+   v6 ADDITIONS: attendance graph, student dashboard
+   ===================================================== */
+
+/* --- Attendance calendar graph --- */
+.att-graph-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 16px;
+  margin: 12px 0 20px;
+}
+.att-graph-summary {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.att-stat {
+  flex: 1;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+}
+.att-stat strong {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.att-stat span {
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.att-stat.green strong { color: #16a34a; }
+.att-stat.red strong { color: #ef4444; }
+.att-stat.blue strong { color: #0a84ff; }
+
+.att-cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  max-width: 360px;
+  margin: 0 auto;
+}
+.att-cal-label {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  padding-bottom: 4px;
+}
+.att-cal-cell {
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+.att-cal-cell.empty { background: transparent; }
+.att-cal-cell.present { background: #16a34a; color: #ffffff; }
+.att-cal-cell.absent { background: #ef4444; color: #ffffff; }
+.att-cal-cell.unmarked { background: #e5e7eb; color: #6b7280; }
+.att-cal-cell.future { background: #fafbfc; color: #cbd5e1; }
+.att-cal-cell.today { box-shadow: 0 0 0 2px #0a84ff; }
+
+.att-cal-legend {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #6b7280;
+  flex-wrap: wrap;
+}
+.att-cal-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.att-cal-legend .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.att-cal-legend .dot.green { background: #16a34a; }
+.att-cal-legend .dot.red { background: #ef4444; }
+.att-cal-legend .dot.gray { background: #e5e7eb; }
+
+@media (max-width: 480px) {
+  .att-cal-cell { font-size: 11px; }
+}
